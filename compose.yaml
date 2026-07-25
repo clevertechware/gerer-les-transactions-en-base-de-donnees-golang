@@ -1,4 +1,5 @@
 services:
+  # The primary takes the writes and streams its WAL to the standby.
   postgres:
     image: postgres:18-alpine
     container_name: handling_db_transactions_in_golang
@@ -6,10 +7,21 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: demo
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - max_wal_senders=10
+      - -c
+      - max_replication_slots=10
+      - -c
+      - hot_standby=on
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql
+      - ./docker/primary:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -17,5 +29,42 @@ services:
       retries: 5
     restart: unless-stopped
 
+  # The standby clones the primary once, then replays its WAL forever.
+  #
+  # default_transaction_read_only is the safety net the article mentions: it is
+  # a connection-level setting, so even a statement sent in autocommit is
+  # refused. Nothing here depends on the application remembering to say BEGIN
+  # TRANSACTION READ ONLY.
+  postgres-replica:
+    image: postgres:18-alpine
+    container_name: handling_db_transactions_in_golang_replica
+    depends_on:
+      postgres:
+        condition: service_healthy
+    user: postgres
+    environment:
+      PGDATA: /var/lib/postgresql/replica
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        set -e
+        if [ ! -s "$$PGDATA/PG_VERSION" ]; then
+          echo "standby: cloning the primary with pg_basebackup"
+          pg_basebackup -h postgres -p 5432 -U postgres -D "$$PGDATA" -Fp -Xs -R -w -P
+          chmod 0700 "$$PGDATA"
+        fi
+        exec postgres -c hot_standby=on -c default_transaction_read_only=on
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_replica_data:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  postgres_replica_data:
