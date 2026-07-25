@@ -1,37 +1,164 @@
+// Package config loads the application configuration from application.yaml,
+// then lets environment variables override it so that credentials never have to
+// live in a committed file.
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"net"
+	"net/url"
+	"path/filepath"
+	"strconv"
+	"strings"
+	"time"
 
-type Pool struct {
-	min int32
-	max int32
+	"github.com/knadh/koanf/parsers/yaml"
+	"github.com/knadh/koanf/providers/env/v2"
+	"github.com/knadh/koanf/providers/file"
+	"github.com/knadh/koanf/v2"
+
+	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
+)
+
+const (
+	configFileName = "application.yaml"
+
+	// envPrefix scopes the environment variables we consider. Nested keys use a
+	// double underscore: DEMO_POSTGRES__PASSWORD overrides postgres.password.
+	envPrefix = "DEMO_"
+	envNested = "__"
+)
+
+// Server holds the HTTP server settings.
+type Server struct {
+	Host string `koanf:"host"`
+	Port int    `koanf:"port"`
+	// Mode is the gin mode: debug, release or test.
+	Mode string `koanf:"mode"`
+	// ShutdownTimeout bounds how long in-flight requests get to finish.
+	ShutdownTimeout time.Duration `koanf:"shutdown_timeout"`
 }
 
-type Database struct {
-	Pool
-	host     string
-	username string
-	password string
-	database string
+// Addr returns the listen address for the HTTP server.
+func (s Server) Addr() string {
+	return net.JoinHostPort(s.Host, strconv.Itoa(s.Port))
 }
 
-func (d Database) connStr() string {
-	return "host=" + d.host + " user=" + d.username + " password=" + d.password + " dbname=" + d.database
+// Postgres holds the database connection settings.
+type Postgres struct {
+	Host     string `koanf:"host"`
+	Port     int    `koanf:"port"`
+	Database string `koanf:"database"`
+	User     string `koanf:"user"`
+	Password string `koanf:"password"`
+	SSLMode  string `koanf:"sslmode"`
+	MinConns int32  `koanf:"min_conns"`
+	MaxConns int32  `koanf:"max_conns"`
 }
 
-func (d Database) DSN() string {
-	return fmt.Sprintf("pgx5://%s:%s@%s:5432/%s", d.username, d.password, d.host, d.database)
+// DSN returns the keyword/value connection string consumed by pgxpool.
+func (p Postgres) DSN() string {
+	return fmt.Sprintf(
+		"host=%s port=%d user=%s password=%s dbname=%s sslmode=%s",
+		p.Host, p.Port, p.User, p.Password, p.Database, p.sslMode(),
+	)
 }
 
-func DefaultDatabase() Database {
-	return Database{
-		host:     "localhost",
-		username: "postgres",
-		password: "postgres",
-		database: "demo",
-		Pool: Pool{
-			min: 1,
-			max: 3,
-		},
+// MigrateURL returns the URL golang-migrate expects for its pgx/v5 driver.
+func (p Postgres) MigrateURL() string {
+	u := url.URL{
+		Scheme:   "pgx5",
+		User:     url.UserPassword(p.User, p.Password),
+		Host:     net.JoinHostPort(p.Host, strconv.Itoa(p.Port)),
+		Path:     "/" + p.Database,
+		RawQuery: url.Values{"sslmode": {p.sslMode()}}.Encode(),
 	}
+	return u.String()
+}
+
+func (p Postgres) sslMode() string {
+	if p.SSLMode == "" {
+		return "disable"
+	}
+	return p.SSLMode
+}
+
+// Remote describes the slow third party the verification endpoints call.
+// One section configures both sides of the exchange: the client lives in
+// cmd/server, the service it talks to lives in cmd/remote.
+type Remote struct {
+	// Client side, read by cmd/server.
+	BaseURL string        `koanf:"base_url"`
+	Timeout time.Duration `koanf:"timeout"`
+
+	// Service side, read by cmd/remote.
+	Port int `koanf:"port"`
+	// Delay is how long the fake provider takes to answer. It is the whole
+	// point of this binary: it makes the cost of an in-transaction network
+	// call impossible to miss.
+	Delay time.Duration `koanf:"delay"`
+}
+
+// Addr returns the listen address for the fake provider.
+func (r Remote) Addr() string {
+	return net.JoinHostPort("", strconv.Itoa(r.Port))
+}
+
+// Application is the root configuration.
+type Application struct {
+	Server   Server               `koanf:"server"`
+	Postgres Postgres             `koanf:"postgres"`
+	Logging  logger.LoggingConfig `koanf:"logging"`
+	Remote   Remote               `koanf:"remote"`
+}
+
+// Load reads application.yaml from dir, then applies DEMO_-prefixed environment
+// variables on top so deployment always wins over the committed file.
+func Load(dir string) (*Application, error) {
+	k := koanf.New(".")
+
+	if err := k.Load(file.Provider(filepath.Join(dir, configFileName)), yaml.Parser()); err != nil {
+		return nil, fmt.Errorf("loading %s: %w", configFileName, err)
+	}
+
+	envProvider := env.Provider(".", env.Opt{
+		Prefix: envPrefix,
+		TransformFunc: func(key, value string) (string, any) {
+			key = strings.ToLower(strings.TrimPrefix(key, envPrefix))
+			return strings.ReplaceAll(key, envNested, "."), value
+		},
+	})
+	if err := k.Load(envProvider, nil); err != nil {
+		return nil, fmt.Errorf("loading environment variables: %w", err)
+	}
+
+	var app Application
+	if err := k.UnmarshalWithConf("", &app, koanf.UnmarshalConf{Tag: "koanf"}); err != nil {
+		return nil, fmt.Errorf("unmarshalling configuration: %w", err)
+	}
+
+	if err := app.validate(); err != nil {
+		return nil, err
+	}
+
+	return &app, nil
+}
+
+// validate rejects the settings that would otherwise fail much later, with a
+// far less obvious error.
+func (a Application) validate() error {
+	switch {
+	case a.Postgres.Host == "":
+		return fmt.Errorf("postgres.host is required")
+	case a.Postgres.Database == "":
+		return fmt.Errorf("postgres.database is required")
+	case a.Postgres.MaxConns < a.Postgres.MinConns:
+		return fmt.Errorf("postgres.max_conns (%d) is lower than postgres.min_conns (%d)",
+			a.Postgres.MaxConns, a.Postgres.MinConns)
+	case a.Server.Port <= 0:
+		return fmt.Errorf("server.port must be positive, got %d", a.Server.Port)
+	case a.Remote.BaseURL == "":
+		return fmt.Errorf("remote.base_url is required")
+	}
+	return nil
 }

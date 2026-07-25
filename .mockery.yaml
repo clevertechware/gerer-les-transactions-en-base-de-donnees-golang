@@ -1,0 +1,21 @@
+all: false
+with-expecter: true
+disable-version-string: true
+resolve-type-alias: false
+issue-845-fix: true
+mockname: "{{.InterfaceName | firstUpper}}"
+filename: "{{.InterfaceName | snakecase}}.go"
+
+packages:
+  github.com/jackc/pgx/v5:
+    interfaces:
+      Tx:
+      Row:
+      Rows:
+
+  github.com/clevertechware/handling-db-transactions-in-golang:
+    config:
+      all: true
+      recursive: true
+      dir: '{{.InterfaceDir}}/mocks'
+      outpkg: 'mocks'

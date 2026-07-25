@@ -1,0 +1,31 @@
+server:
+  host: ""
+  port: 8080
+  mode: debug
+  shutdown_timeout: 10s
+
+postgres:
+  host: localhost
+  port: 5432
+  database: demo
+  user: postgres
+  password: postgres
+  sslmode: disable
+  min_conns: 2
+  # Deliberately small. The point of this demo is to show how quickly a pool
+  # gets exhausted when a transaction holds a connection across a network call.
+  max_conns: 10
+
+logging:
+  level: debug
+  format: text
+
+remote:
+  # Client side, used by cmd/server.
+  base_url: http://localhost:9090
+  # Must stay above the delay below, otherwise every verification times out.
+  timeout: 10s
+
+  # Service side, used by cmd/remote.
+  port: 9090
+  delay: 3s
