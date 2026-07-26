@@ -7,7 +7,7 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
 )
 
 // The interfaces below are declared here, where they are consumed, rather than

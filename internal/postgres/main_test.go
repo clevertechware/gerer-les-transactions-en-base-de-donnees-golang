@@ -4,7 +4,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/testutil"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/testutil"
 )
 
 // TestMain starts one PostgreSQL container for the whole package.

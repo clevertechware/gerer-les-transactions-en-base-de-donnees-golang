@@ -8,10 +8,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/service/mocks"
-	"github.com/clevertechware/handling-db-transactions-in-golang/pkg/transaction"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service/mocks"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction"
 )
 
 // The CRUD services take no transaction.Manager at all. A constructor signature

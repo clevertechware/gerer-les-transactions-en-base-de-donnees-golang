@@ -6,8 +6,8 @@ import (
 
 	"github.com/stretchr/testify/mock"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/pkg/transaction"
-	txmocks "github.com/clevertechware/handling-db-transactions-in-golang/pkg/transaction/mocks"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction"
+	txmocks "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction/mocks"
 )
 
 // boundary says which transaction boundaries a mocked manager will accept.

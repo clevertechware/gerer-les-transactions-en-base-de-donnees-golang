@@ -9,8 +9,8 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
 )
 
 const userColumns = `id, first_name, last_name, email, username, created_at, updated_at`

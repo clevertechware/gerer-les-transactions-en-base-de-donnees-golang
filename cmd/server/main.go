@@ -9,13 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/config"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/gateway"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/handler"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/migrate"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/postgres"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/service"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/gateway"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/handler"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/migrate"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/postgres"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service"
 )
 
 func main() {

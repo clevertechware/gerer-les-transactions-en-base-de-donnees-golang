@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	domain "github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
+	domain "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
 
 	mock "github.com/stretchr/testify/mock"
 

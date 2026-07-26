@@ -8,8 +8,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
 )
 
 const companyColumns = `id, name, address, verification_status, verification_ref,

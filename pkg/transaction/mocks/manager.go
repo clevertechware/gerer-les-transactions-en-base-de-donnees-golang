@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	transaction "github.com/clevertechware/handling-db-transactions-in-golang/pkg/transaction"
+	transaction "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction"
 	mock "github.com/stretchr/testify/mock"
 )
 

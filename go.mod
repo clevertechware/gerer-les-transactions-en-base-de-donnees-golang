@@ -1,4 +1,4 @@
-module github.com/clevertechware/handling-db-transactions-in-golang
+module github.com/clevertechware/gerer-les-transactions-en-base-de-donnees
 
 go 1.26
 

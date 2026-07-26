@@ -11,9 +11,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/config"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
 )
 
 type verifyRequest struct {

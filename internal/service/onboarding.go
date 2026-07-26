@@ -3,9 +3,9 @@ package service
 import (
 	"context"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
-	"github.com/clevertechware/handling-db-transactions-in-golang/pkg/transaction"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction"
 )
 
 // OnboardingInput is what the caller supplies to register a company together

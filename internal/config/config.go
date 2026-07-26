@@ -17,7 +17,7 @@ import (
 	"github.com/knadh/koanf/providers/file"
 	"github.com/knadh/koanf/v2"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
 )
 
 const (

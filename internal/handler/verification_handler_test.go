@@ -14,9 +14,9 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/handler/mocks"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/handler/mocks"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
 )
 
 // newTestContext builds a gin context with the given path parameters.

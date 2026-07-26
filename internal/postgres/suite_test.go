@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/testutil"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/testutil"
 )
 
 // uuidNotInDatabase is a well-formed identifier that no row will ever carry,

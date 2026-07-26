@@ -9,7 +9,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
 )
 
 const (

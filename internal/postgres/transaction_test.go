@@ -12,10 +12,10 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/postgres/mocks"
-	pgxmocks "github.com/clevertechware/handling-db-transactions-in-golang/mocks/github.com/jackc/pgx/v5"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/postgres/mocks"
+	pgxmocks "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/mocks/github.com/jackc/pgx/v5"
 )
 
 var errUnitOfWork = errors.New("unit of work failed")

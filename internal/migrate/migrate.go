@@ -10,7 +10,7 @@ import (
 	_ "github.com/golang-migrate/migrate/v4/database/pgx/v5"
 	_ "github.com/golang-migrate/migrate/v4/source/file"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
 )
 
 // Up applies every pending migration found in migrationsPath.
