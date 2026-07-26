@@ -189,22 +189,66 @@ Le seuil ne bouge pas : **une transaction en lecture se justifie quand plusieurs
 - **La protection en écriture ne vient pas du `BEGIN`** mais de `default_transaction_read_only = on` posé sur la connexion vers le réplica. C'est un réglage de connexion : il couvre aussi l'autocommit.
 - **Ça coûte.** Deux aller-retours par lecture, et en pooling par transaction la connexion reste attachée pendant tout le bloc au lieu d'être rendue après chaque instruction.
 
-## La branche `feat/replication-routing`
+**Cette branche en fait la démonstration exécutable.** `main` reste volontairement à un seul PostgreSQL.
 
-`main` reste volontairement à un seul PostgreSQL. La démonstration exécutable de tout ce qui précède vit sur la branche **[`feat/replication-routing`](../../tree/feat/replication-routing)**, qui n'a pas vocation à être fusionnée : elle existe pour être lue et exécutée.
+### Ce que la branche ajoute
 
-```bash
-git switch feat/replication-routing
-make db-up          # primaire 5432 + standby cloné par pg_basebackup, 5433
-make db-seed        # 200 000 sociétés, 100 000 users, 140 000 rattachements
-make test-integration
+`compose.yaml` monte un standby (`pg_basebackup -R`, `default_transaction_read_only=on`) sur le port 5433. Côté code, une seule option :
+
+```go
+txManager := postgres.NewTxManager(log, primaryPool, postgres.WithReadReplica(replicaPool))
 ```
 
-Elle ajoute un primaire + un standby dans `compose.yaml`, une option `postgres.WithReadReplica(pool)` qui route `ExecuteReadOnly` vers le standby, et un paquet `test/replication` qui **suspend le rejeu du WAL** (`pg_wal_replay_pause()`) pour rendre le retard déterministe plutôt que de courir après.
+| Chemin | Destination | Pourquoi |
+|---|---|---|
+| `ExecuteReadOnly` | **réplica** | Le seul dont l'appelant a promis de ne pas écrire |
+| `Execute`, `ExecuteSerializable` | primaire | Elles écrivent |
+| `Executor(ctx)` hors transaction | primaire | Le manager ne sait pas si l'instruction suivante écrit |
 
-`git diff main..feat/replication-routing` ne touche ni `internal/service`, ni `internal/handler`, ni `internal/domain` — le routage lecture/écriture est une décision d'infrastructure, et le fait que la couche métier ne bouge pas est le résultat, pas un détail.
+La section `postgres.replica` d'`application.yaml` n'a besoin que de ce qui diffère du primaire ; le reste est hérité. Supprimez-la et le serveur retombe exactement sur le comportement de `main`.
 
-Ce que ces tests ont établi et qui corrige l'intuition courante : **le `25006` ne vient pas du `BEGIN`.** Posé sur une connexion au *primaire*, sans réplication et sans transaction explicite, `default_transaction_read_only = on` refuse déjà un `INSERT` en autocommit. Et un standby refuse l'écriture même si la session remet le réglage à `off` : un serveur en *recovery* ne sait pas écrire.
+`git diff main..feat/replication-routing` ne touche ni `internal/service`, ni `internal/handler`, ni `internal/domain`. C'est le point : le routage lecture/écriture est une décision d'infrastructure.
+
+### Ce que ça coûte : `test/replication`
+
+Les tests montent un vrai couple primaire/standby avec testcontainers, puis **suspendent le rejeu du WAL** (`pg_wal_replay_pause()`). Le retard devient contrôlé au lieu d'être couru après.
+
+| Test | Ce qu'il établit |
+|---|---|
+| `TestExecuteReadOnly_ReadsAStandbyThatHasNotCaughtUp` | La ligne est *commitée* sur le primaire et `ExecuteReadOnly` ne la trouve pas |
+| `TestExecute_SeesItsOwnWritesWhileTheStandbyLags` | Même manager, même standby en retard : le chemin en écriture lit ce qu'il a écrit |
+| `TestAutocommitReadsStayOnThePrimary` | Un `GET` isolé n'est pas routé, sinon tout *read-your-writes* casse |
+
+Conséquence pratique : un endpoint qui relit ce que la même requête vient d'écrire ne doit pas passer par `ExecuteReadOnly`. Le marquage explicite rend ce compromis visible dans le code — c'est sa vraie valeur, plus encore que le filet `25006`.
+
+### Deux corrections à l'intuition courante
+
+**Le `25006` ne vient pas du `BEGIN`.** `TestReadOnlyConnection_RefusesAWriteWithNoTransactionEverOpened` pose `default_transaction_read_only=on` sur une connexion **au primaire**, sans réplication et sans transaction explicite : l'`INSERT` en autocommit est refusé quand même. Et `TestStandby_RefusesAWriteEvenWithTheSettingTurnedOff` va plus loin — une session peut remettre le réglage à `off` sur le standby, l'écriture échoue toujours, parce qu'un serveur en recovery ne sait pas écrire. Le réglage est le refus poli ; la recovery est celui qui ne se discute pas.
+
+**`DEFERRABLE` n'est pas un outil de standby.** L'affirmation inverse figurait dans une version antérieure de ce README ; les tests l'ont démentie :
+
+| Sur | Instruction | Résultat |
+|---|---|---|
+| standby | `BEGIN … SERIALIZABLE READ ONLY DEFERRABLE` | **refusé**, `0A000 cannot use serializable mode in a hot standby` |
+| standby | `BEGIN TRANSACTION READ ONLY DEFERRABLE` | accepté, `transaction_deferrable = on`… et **sans aucun effet** : l'isolation reste `read committed`, or `DEFERRABLE` ne signifie quelque chose que sous `SERIALIZABLE READ ONLY` |
+| primaire | `BEGIN … SERIALIZABLE READ ONLY DEFERRABLE` | accepté, `serializable` + `deferrable = on` |
+
+La deuxième ligne est la plus dangereuse : la requête a l'air protégée et ne l'est pas.
+
+Ce qui protège réellement une requête longue sur un standby, ce sont `max_standby_streaming_delay` (30 s par défaut — le délai avant que le rejeu du WAL annule la requête) et `hot_standby_feedback` (`off` par défaut : le primaire vacuume sans attendre ce standby). `TestStandby_ProtectsLongQueriesWithADelayNotWithDeferrable` les épingle.
+
+### À la main
+
+```bash
+make db-up                    # primaire 5432 + standby 5433
+make db-seed                  # 200 000 sociétés, 100 000 users, 140 000 rattachements
+make replication-status       # retard de rejeu, en octets
+make test-integration         # inclut ./test/replication
+```
+
+`prefill_data_final.sql` sert à voir le routage sous une charge réaliste : un `GET /api/companies/:id/report` sur un jeu vide ne dit rien du tout. Le script `TRUNCATE` les trois tables avant de recharger, il n'est pas fait pour tourner sur autre chose qu'une base de démo.
+
+Trois sociétés sur quatre restent en `pending`, sinon les endpoints `verify-bad` / `verify-good` n'ont plus rien à vérifier. La contrainte `companies_verification_ref_check` a d'ailleurs attrapé la première version du script, qui insérait `verified` sans référence — exactement ce que l'article dit d'attendre d'un invariant exprimé en contrainte.
 
 ## Structure
 

@@ -1,4 +1,4 @@
-.PHONY: help build run-server run-remote test test-unit test-integration demo mock mock-clean tidy fmt db-up db-down clean
+.PHONY: help build run-server run-remote test test-unit test-integration demo mock mock-clean tidy fmt db-up db-down db-seed replication-status clean
 
 BIN := bin
 
@@ -39,11 +39,20 @@ tidy: ## Tidy go.mod
 fmt: ## Format the code
 	gofmt -s -w .
 
-db-up: ## Start PostgreSQL
+db-up: ## Start the primary and its standby
 	docker compose up -d --wait
 
-db-down: ## Stop PostgreSQL and drop its volume
+db-down: ## Stop both servers and drop their volumes
 	docker compose down -v
+
+db-seed: ## Load the demo dataset into the primary (200k companies, 100k users)
+	docker compose exec -T postgres psql -U postgres -d demo -q -v ON_ERROR_STOP=1 -f - < prefill_data_final.sql
+
+replication-status: ## Show how far behind the standby is
+	docker compose exec -T postgres psql -U postgres -d demo -c "\
+		SELECT application_name, state, sync_state, \
+		       pg_wal_lsn_diff(sent_lsn, replay_lsn) AS replay_lag_bytes \
+		FROM pg_stat_replication;"
 
 clean: ## Remove build artifacts
 	rm -rf $(BIN)

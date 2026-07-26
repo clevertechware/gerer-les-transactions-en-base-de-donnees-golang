@@ -126,8 +126,27 @@ invariant que le code applicatif n'a plus à défendre.
 
 ## Branche `feat/replication-routing`
 
-La démonstration de la section réplication de l'article (primaire + standby,
-routage des lectures) vit sur une branche séparée. `main` reste à un seul
-PostgreSQL. Le diff de la branche ne doit toucher que `compose.yaml`,
-`internal/config` et `internal/postgres/{pool,transaction}.go` — s'il déborde sur
-`internal/service`, c'est que l'abstraction a fui.
+Vous êtes sur cette branche. Elle porte la démonstration de la section
+réplication de l'article ; `main` reste à un seul PostgreSQL et ne doit pas
+recevoir ce code.
+
+Le diff par rapport à `main` se limite à `compose.yaml`, `docker/primary/`,
+`application.yaml`, `internal/config`, `internal/postgres/transaction.go`,
+`cmd/server/main.go` et `test/replication/`. **S'il déborde sur
+`internal/service`, `internal/handler` ou `internal/domain`, c'est que
+l'abstraction a fui** — le routage lecture/écriture est une décision
+d'infrastructure, la couche métier ne doit pas savoir qu'un réplica existe.
+
+Invariants à ne pas casser :
+
+- `WithReadReplica` est une option, pas un paramètre. Sans elle, `NewTxManager`
+  se comporte exactement comme sur `main` (`replica` vaut alors `client`).
+- Seul `ExecuteReadOnly` est routé. `Executor(ctx)` hors transaction reste sur le
+  primaire : le manager ne peut pas savoir si l'instruction suivante écrit.
+- Une lecture seule imbriquée dans une transaction en écriture rejoint la
+  transaction ambiante, donc reste sur le primaire.
+- `test/replication` monte sa propre topologie et n'utilise pas
+  `internal/testutil.Shared` (un seul conteneur, pas de standby). Les tests
+  suspendent le rejeu du WAL plutôt que de courir après le retard ; toute
+  suspension doit être reprise dans un `t.Cleanup`, sinon les tests suivants
+  lisent un standby figé.

@@ -43,12 +43,18 @@ BEGIN
         start_idx := (i - 1) * batch_size + 1;
         end_idx := LEAST(i * batch_size, total);
         
-        INSERT INTO companies (id, name, address, verification_status, seat_limit, created_at, updated_at)
-        SELECT 
+        -- companies_verification_ref_check ties the three verification columns
+        -- together: verified means a reference and a date, anything else means
+        -- neither. Three companies out of four are left pending so the
+        -- verify-bad / verify-good endpoints have something to work on.
+        INSERT INTO companies (id, name, address, verification_status, verification_ref, verified_at, seat_limit, created_at, updated_at)
+        SELECT
             uuidv7(),
             'Company ' || seq || ' - ' || industry_names[(seq % 5) + 1] || ' Corp',
             'Address ' || seq || ', Business District, City',
-            'verified',
+            CASE WHEN seq % 4 = 0 THEN 'verified' ELSE 'pending' END,
+            CASE WHEN seq % 4 = 0 THEN 'REF-' || seq END,
+            CASE WHEN seq % 4 = 0 THEN NOW() - (random() * interval '30 days') END,
             (random() * 100)::integer + 1,
             NOW() - (random() * interval '365 days'),
             NOW()
@@ -148,16 +154,19 @@ DO $$
 DECLARE
     batch_size INTEGER := 5000;
     total_users INTEGER := 20000;
+    -- Where this block's slice of users starts. Without it every block would
+    -- walk users 1..total_users again and collide with the previous one.
+    user_offset INTEGER := 70000;
     batches INTEGER;
     i INTEGER;
     start_seq INTEGER;
     end_seq INTEGER;
 BEGIN
     batches := CEIL(total_users::FLOAT / batch_size);
-    
+
     FOR i IN 1..batches LOOP
-        start_seq := (i - 1) * batch_size + 1;
-        end_seq := LEAST(i * batch_size, total_users);
+        start_seq := user_offset + (i - 1) * batch_size + 1;
+        end_seq := user_offset + LEAST(i * batch_size, total_users);
         
         -- First company
         INSERT INTO user_companies (user_id, company_id, role)
@@ -192,16 +201,17 @@ DO $$
 DECLARE
     batch_size INTEGER := 5000;
     total_users INTEGER := 10000;
+    user_offset INTEGER := 90000;
     batches INTEGER;
     i INTEGER;
     start_seq INTEGER;
     end_seq INTEGER;
 BEGIN
     batches := CEIL(total_users::FLOAT / batch_size);
-    
+
     FOR i IN 1..batches LOOP
-        start_seq := (i - 1) * batch_size + 1;
-        end_seq := LEAST(i * batch_size, total_users);
+        start_seq := user_offset + (i - 1) * batch_size + 1;
+        end_seq := user_offset + LEAST(i * batch_size, total_users);
         
         -- First company
         INSERT INTO user_companies (user_id, company_id, role)
