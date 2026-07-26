@@ -1,9 +1,9 @@
 // Package replication tests what routing reads to a hot standby actually buys
 // and actually costs.
 //
-// None of it can be mocked: replication lag, the standby's refusal to write and
-// the behaviour of DEFERRABLE are properties of a running PostgreSQL pair, so
-// this package builds one — a primary and a standby cloned from it, streaming.
+// None of it can be mocked: replication lag and the standby's refusal to write
+// are properties of a running PostgreSQL pair, so this package builds one — a
+// primary and a standby cloned from it, streaming.
 package replication
 
 import (

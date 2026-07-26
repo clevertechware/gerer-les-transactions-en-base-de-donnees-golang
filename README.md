@@ -221,21 +221,11 @@ Les tests montent un vrai couple primaire/standby avec testcontainers, puis **su
 
 Conséquence pratique : un endpoint qui relit ce que la même requête vient d'écrire ne doit pas passer par `ExecuteReadOnly`. Le marquage explicite rend ce compromis visible dans le code — c'est sa vraie valeur, plus encore que le filet `25006`.
 
-### Deux corrections à l'intuition courante
+### Une correction à l'intuition courante
 
 **Le `25006` ne vient pas du `BEGIN`.** `TestReadOnlyConnection_RefusesAWriteWithNoTransactionEverOpened` pose `default_transaction_read_only=on` sur une connexion **au primaire**, sans réplication et sans transaction explicite : l'`INSERT` en autocommit est refusé quand même. Et `TestStandby_RefusesAWriteEvenWithTheSettingTurnedOff` va plus loin — une session peut remettre le réglage à `off` sur le standby, l'écriture échoue toujours, parce qu'un serveur en recovery ne sait pas écrire. Le réglage est le refus poli ; la recovery est celui qui ne se discute pas.
 
-**`DEFERRABLE` n'est pas un outil de standby.** L'affirmation inverse figurait dans une version antérieure de ce README ; les tests l'ont démentie :
-
-| Sur | Instruction | Résultat |
-|---|---|---|
-| standby | `BEGIN … SERIALIZABLE READ ONLY DEFERRABLE` | **refusé**, `0A000 cannot use serializable mode in a hot standby` |
-| standby | `BEGIN TRANSACTION READ ONLY DEFERRABLE` | accepté, `transaction_deferrable = on`… et **sans aucun effet** : l'isolation reste `read committed`, or `DEFERRABLE` ne signifie quelque chose que sous `SERIALIZABLE READ ONLY` |
-| primaire | `BEGIN … SERIALIZABLE READ ONLY DEFERRABLE` | accepté, `serializable` + `deferrable = on` |
-
-La deuxième ligne est la plus dangereuse : la requête a l'air protégée et ne l'est pas.
-
-Ce qui protège réellement une requête longue sur un standby, ce sont `max_standby_streaming_delay` (30 s par défaut — le délai avant que le rejeu du WAL annule la requête) et `hot_standby_feedback` (`off` par défaut : le primaire vacuume sans attendre ce standby). `TestStandby_ProtectsLongQueriesWithADelayNotWithDeferrable` les épingle.
+Pour une requête analytique longue sur le standby, le risque n'est pas l'écriture mais l'annulation : le rejeu du WAL entre en conflit avec son instantané. Cela se règle avec `max_standby_streaming_delay` et `hot_standby_feedback`, côté serveur — rien à écrire dans l'application, donc rien à tester ici.
 
 ### À la main
 
