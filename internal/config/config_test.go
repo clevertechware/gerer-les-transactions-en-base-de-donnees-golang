@@ -3,6 +3,7 @@ package config
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -34,6 +35,17 @@ remote:
   port: 9090
   delay: 3s
 `
+
+// withReplica splices a replica block into the postgres section of validConfig.
+func withReplica(t *testing.T, block string) string {
+	t.Helper()
+
+	const anchor = "  max_conns: 10\n"
+	before, after, found := strings.Cut(validConfig, anchor)
+	require.True(t, found, "validConfig no longer contains the postgres anchor")
+
+	return before + anchor + block + after
+}
 
 // writeConfig drops a config file into a temporary directory and returns it.
 func writeConfig(t *testing.T, content string) string {
@@ -111,6 +123,22 @@ remote: {base_url: "http://x"}
 			wantErr: "postgres.max_conns",
 		},
 		{
+			name: "replica resolving to the primary",
+			config: `
+server: {port: 8080}
+postgres:
+  host: localhost
+  port: 5432
+  database: demo
+  min_conns: 1
+  max_conns: 2
+  replica:
+    user: readonly
+remote: {base_url: "http://x"}
+`,
+			wantErr: "postgres.replica resolves to the primary",
+		},
+		{
 			name: "no remote base url",
 			config: `
 server: {port: 8080}
@@ -165,4 +193,53 @@ func TestPostgres_SSLModeDefaultsToDisable(t *testing.T) {
 
 	assert.Contains(t, pg.DSN(), "sslmode=disable")
 	assert.Contains(t, pg.MigrateURL(), "sslmode=disable")
+}
+
+// TestReadReplica_IsAbsentByDefault pins the property the whole branch rests
+// on: without a replica section this configuration behaves exactly like main.
+func TestReadReplica_IsAbsentByDefault(t *testing.T) {
+	dir := writeConfig(t, validConfig)
+
+	cfg, err := Load(dir)
+	require.NoError(t, err)
+
+	assert.Nil(t, cfg.Postgres.ReadReplica())
+}
+
+func TestReadReplica_InheritsEverythingItDoesNotOverride(t *testing.T) {
+	dir := writeConfig(t, withReplica(t, `  replica:
+    port: 5433
+    max_conns: 4
+`))
+
+	cfg, err := Load(dir)
+	require.NoError(t, err)
+
+	replica := cfg.Postgres.ReadReplica()
+	require.NotNil(t, replica)
+
+	assert.Equal(t, 5433, replica.Port)
+	assert.Equal(t, int32(4), replica.MaxConns)
+	assert.Equal(t, "localhost", replica.Host)
+	assert.Equal(t, "demo", replica.Database)
+	assert.Equal(t, "postgres", replica.User)
+	assert.Equal(t, "postgres", replica.Password)
+	assert.Equal(t, int32(2), replica.MinConns)
+	assert.Nil(t, replica.Replica)
+}
+
+func TestReadReplica_IsConfigurableFromTheEnvironment(t *testing.T) {
+	dir := writeConfig(t, withReplica(t, `  replica:
+    port: 5433
+`))
+
+	t.Setenv("DEMO_POSTGRES__REPLICA__HOST", "standby.internal")
+
+	cfg, err := Load(dir)
+	require.NoError(t, err)
+
+	replica := cfg.Postgres.ReadReplica()
+	require.NotNil(t, replica)
+	assert.Equal(t, "standby.internal", replica.Host)
+	assert.Equal(t, 5433, replica.Port)
 }

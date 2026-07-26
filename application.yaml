@@ -16,6 +16,12 @@ postgres:
   # gets exhausted when a transaction holds a connection across a network call.
   max_conns: 10
 
+  # The hot standby from compose.yaml. Only what differs from the primary is
+  # listed; everything else is inherited. Comment this block out and the server
+  # runs against a single database again, with no other change anywhere.
+  replica:
+    port: 5433
+
 logging:
   level: debug
   format: text

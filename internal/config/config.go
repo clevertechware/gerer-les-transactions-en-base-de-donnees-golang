@@ -54,6 +54,52 @@ type Postgres struct {
 	SSLMode  string `koanf:"sslmode"`
 	MinConns int32  `koanf:"min_conns"`
 	MaxConns int32  `koanf:"max_conns"`
+
+	// Replica points at a hot standby that read-only transactions can be sent
+	// to. Leave it out and everything runs on this connection, which is the
+	// single-database setup the rest of the demo assumes.
+	Replica *Postgres `koanf:"replica"`
+}
+
+// ReadReplica returns the standby settings, or nil when none is configured.
+//
+// A standby usually differs from its primary by a host and a port and nothing
+// else, so every field left empty is inherited. That way the replica section
+// stays as short as what actually changes.
+func (p Postgres) ReadReplica() *Postgres {
+	if p.Replica == nil {
+		return nil
+	}
+
+	replica := *p.Replica
+	replica.Replica = nil
+
+	if replica.Host == "" {
+		replica.Host = p.Host
+	}
+	if replica.Port == 0 {
+		replica.Port = p.Port
+	}
+	if replica.Database == "" {
+		replica.Database = p.Database
+	}
+	if replica.User == "" {
+		replica.User = p.User
+	}
+	if replica.Password == "" {
+		replica.Password = p.Password
+	}
+	if replica.SSLMode == "" {
+		replica.SSLMode = p.SSLMode
+	}
+	if replica.MinConns == 0 {
+		replica.MinConns = p.MinConns
+	}
+	if replica.MaxConns == 0 {
+		replica.MaxConns = p.MaxConns
+	}
+
+	return &replica
 }
 
 // DSN returns the keyword/value connection string consumed by pgxpool.
@@ -155,10 +201,25 @@ func (a Application) validate() error {
 	case a.Postgres.MaxConns < a.Postgres.MinConns:
 		return fmt.Errorf("postgres.max_conns (%d) is lower than postgres.min_conns (%d)",
 			a.Postgres.MaxConns, a.Postgres.MinConns)
+	case a.replicaPointsAtThePrimary():
+		return fmt.Errorf("postgres.replica resolves to the primary (%s), which would route reads back to it",
+			a.Postgres.Replica.Host)
 	case a.Server.Port <= 0:
 		return fmt.Errorf("server.port must be positive, got %d", a.Server.Port)
 	case a.Remote.BaseURL == "":
 		return fmt.Errorf("remote.base_url is required")
 	}
 	return nil
+}
+
+// replicaPointsAtThePrimary catches the misconfiguration that is invisible at
+// runtime: a replica section that inherits so much it ends up describing the
+// primary. Reads would silently keep landing on it and the routing would look
+// like it works.
+func (a Application) replicaPointsAtThePrimary() bool {
+	replica := a.Postgres.ReadReplica()
+	if replica == nil {
+		return false
+	}
+	return replica.Host == a.Postgres.Host && replica.Port == a.Postgres.Port
 }

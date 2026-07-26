@@ -28,6 +28,8 @@ func newTestManager(client Client) *TxManager {
 	return NewTxManager(logger.NewNoOpLogger(), client)
 }
 
+func noopUnitOfWork(context.Context) error { return nil }
+
 // TestTxManager_Execute_Commits proves the happy path ends in COMMIT, not just
 // "no error".
 func TestTxManager_Execute_Commits(t *testing.T) {
@@ -266,4 +268,97 @@ func TestTxManager_RequireTx(t *testing.T) {
 	got, err := manager.RequireTx(contextWithTx(t.Context(), tx))
 	require.NoError(t, err)
 	assert.Same(t, tx, got)
+}
+
+// TestTxManager_RoutesOnlyReadOnlyTransactionsToTheReplica is the whole point of
+// WithReadReplica, and the assertion that would catch the dangerous mistake:
+// sending a write to a standby fails at runtime, in production, on the endpoint
+// nobody load-tested.
+func TestTxManager_RoutesOnlyReadOnlyTransactionsToTheReplica(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name      string
+		execute   func(*TxManager, context.Context) error
+		opts      pgx.TxOptions
+		onPrimary bool
+	}{
+		{
+			name:      "Execute stays on the primary",
+			execute:   func(m *TxManager, ctx context.Context) error { return m.Execute(ctx, noopUnitOfWork) },
+			opts:      pgx.TxOptions{},
+			onPrimary: true,
+		},
+		{
+			name:      "ExecuteSerializable stays on the primary",
+			execute:   func(m *TxManager, ctx context.Context) error { return m.ExecuteSerializable(ctx, noopUnitOfWork) },
+			opts:      pgx.TxOptions{IsoLevel: pgx.Serializable},
+			onPrimary: true,
+		},
+		{
+			name:      "ExecuteReadOnly goes to the replica",
+			execute:   func(m *TxManager, ctx context.Context) error { return m.ExecuteReadOnly(ctx, noopUnitOfWork) },
+			opts:      pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+			onPrimary: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			tx := pgxmocks.NewTx(t)
+			tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+
+			primary, replica := mocks.NewClient(t), mocks.NewClient(t)
+			chosen := replica
+			if tt.onPrimary {
+				chosen = primary
+			}
+			chosen.EXPECT().BeginTx(mock.Anything, tt.opts).Return(tx, nil).Once()
+
+			manager := NewTxManager(logger.NewNoOpLogger(), primary, WithReadReplica(replica))
+
+			require.NoError(t, tt.execute(manager, t.Context()))
+		})
+	}
+}
+
+// TestTxManager_WithoutAReplicaEverythingRunsOnThePrimary pins the property that
+// keeps this branch a strict superset of main: no replica configured, no change
+// in behaviour.
+func TestTxManager_WithoutAReplicaEverythingRunsOnThePrimary(t *testing.T) {
+	t.Parallel()
+
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+
+	primary := mocks.NewClient(t)
+	primary.EXPECT().
+		BeginTx(mock.Anything, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}).
+		Return(tx, nil).Once()
+
+	require.NoError(t, newTestManager(primary).ExecuteReadOnly(t.Context(), noopUnitOfWork))
+}
+
+// TestTxManager_ReadOnlyNestedInAWriteStaysOnThePrimary guards the case that
+// would otherwise read a snapshot missing the rows the enclosing transaction
+// just wrote — and has not committed, so no standby could ever see them.
+func TestTxManager_ReadOnlyNestedInAWriteStaysOnThePrimary(t *testing.T) {
+	t.Parallel()
+
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+
+	primary, replica := mocks.NewClient(t), mocks.NewClient(t)
+	primary.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	manager := NewTxManager(logger.NewNoOpLogger(), primary, WithReadReplica(replica))
+
+	err := manager.Execute(t.Context(), func(ctx context.Context) error {
+		return manager.ExecuteReadOnly(ctx, noopUnitOfWork)
+	})
+
+	require.NoError(t, err)
+	replica.AssertNotCalled(t, "BeginTx", mock.Anything, mock.Anything)
 }

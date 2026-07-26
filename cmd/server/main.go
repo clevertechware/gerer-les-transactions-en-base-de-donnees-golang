@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"os"
 	"os/signal"
 	"syscall"
@@ -51,7 +52,14 @@ func run() error {
 	}
 	defer pool.Close()
 	log.InfoContext(ctx, "connected to database", "database", cfg.Postgres.Database)
-	txManager := postgres.NewTxManager(log, pool)
+
+	txOptions, closeReplica, err := readReplicaOptions(ctx, cfg.Postgres, log)
+	if err != nil {
+		return err
+	}
+	defer closeReplica()
+
+	txManager := postgres.NewTxManager(log, pool, txOptions...)
 
 	companyRepo := postgres.NewCompanyRepository(txManager, log)
 	userRepo := postgres.NewUserRepository(txManager, log)
@@ -77,4 +85,27 @@ func run() error {
 
 	server := handler.NewHTTPServer(cfg.Server, log, pool, handlers)
 	return server.Run(ctx)
+}
+
+// readReplicaOptions opens the standby pool when postgres.replica is configured
+// and returns the options that route read-only transactions to it. With no
+// replica section it returns nothing to apply, which is the single-database
+// setup every service in this repository was written against.
+func readReplicaOptions(ctx context.Context, cfg config.Postgres, log logger.Logger) ([]postgres.Option, func(), error) {
+	replicaCfg := cfg.ReadReplica()
+	if replicaCfg == nil {
+		return nil, func() {}, nil
+	}
+
+	// Migrations are never run here: a standby is physically read-only, and its
+	// schema arrives through the WAL like everything else.
+	replicaPool, err := postgres.NewPool(ctx, *replicaCfg)
+	if err != nil {
+		return nil, nil, fmt.Errorf("connecting to the read replica: %w", err)
+	}
+
+	log.InfoContext(ctx, "read-only transactions routed to the replica",
+		"host", replicaCfg.Host, "port", replicaCfg.Port)
+
+	return []postgres.Option{postgres.WithReadReplica(replicaPool)}, replicaPool.Close, nil
 }

@@ -32,15 +32,36 @@ const (
 type TxManager struct {
 	logger logger.Logger
 	client Client
+	// replica takes the read-only transactions. It defaults to client, so the
+	// single-database setup needs no special case anywhere below.
+	replica Client
 
 	// serializationRetries counts replays caused by a serialization failure.
 	// Exposed so tests can prove a retry actually happened rather than infer it.
 	serializationRetries atomic.Int64
 }
 
+// Option configures a TxManager.
+type Option func(*TxManager)
+
+// WithReadReplica sends the transactions opened by ExecuteReadOnly to a hot
+// standby instead of the primary.
+//
+// This is the payoff of marking a read block explicitly. A transaction that
+// merely happens to only read is indistinguishable from one that will write on
+// its next statement, so nothing can route it. ExecuteReadOnly is a promise the
+// caller made, and a promise is routable.
+func WithReadReplica(replica Client) Option {
+	return func(t *TxManager) { t.replica = replica }
+}
+
 // NewTxManager creates a TxManager over the given client.
-func NewTxManager(log logger.Logger, client Client) *TxManager {
-	return &TxManager{logger: log, client: client}
+func NewTxManager(log logger.Logger, client Client, opts ...Option) *TxManager {
+	manager := &TxManager{logger: log, client: client, replica: client}
+	for _, opt := range opts {
+		opt(manager)
+	}
+	return manager
 }
 
 // Executor returns the transaction carried by ctx if there is one, and the
@@ -51,6 +72,11 @@ func NewTxManager(log logger.Logger, client Client) *TxManager {
 // one stays where it belongs: in the service, next to the business invariant
 // that justifies it. Without this, every single-statement read and write would
 // be wrapped in a BEGIN it does not need.
+//
+// The autocommit path stays on the primary even when a replica is configured. A
+// lone statement here may be a read or a write — the manager cannot tell — and
+// sending reads to a standby by default would break read-your-writes for every
+// caller that just wrote a row.
 func (t *TxManager) Executor(ctx context.Context) Executor {
 	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
 		return tx
@@ -72,7 +98,7 @@ func (t *TxManager) RequireTx(ctx context.Context) (pgx.Tx, error) {
 
 // Execute runs unitOfWork in a read-write transaction at the default isolation level.
 func (t *TxManager) Execute(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
-	return t.run(ctx, pgx.TxOptions{}, unitOfWork)
+	return t.run(ctx, t.client, pgx.TxOptions{}, unitOfWork)
 }
 
 // ExecuteReadOnly runs unitOfWork in an explicitly read-only transaction whose reads all observe the same snapshot.
@@ -83,9 +109,13 @@ func (t *TxManager) Execute(ctx context.Context, unitOfWork transaction.UnitOfWo
 // REPEATABLE READ freezes the snapshot at the first query.
 //
 // AccessMode ReadOnly adds the safety net: PostgreSQL rejects any write with
-// SQLSTATE 25006, and a routing layer may send the whole block to a replica.
+// SQLSTATE 25006.
+//
+// It is also what makes the block routable. With WithReadReplica the whole
+// transaction runs on a standby, and the caller trades read-your-writes for the
+// primary's spared capacity — a trade only the explicit marking makes visible.
 func (t *TxManager) ExecuteReadOnly(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
-	return t.run(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, unitOfWork)
+	return t.run(ctx, t.replica, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, unitOfWork)
 }
 
 // ExecuteSerializable runs unitOfWork under SERIALIZABLE isolation and replays it on a serialization failure.
@@ -99,7 +129,7 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 
 	var err error
 	for attempt := 1; attempt <= serializableMaxAttempts; attempt++ {
-		err = t.run(ctx, opts, unitOfWork)
+		err = t.run(ctx, t.client, opts, unitOfWork)
 		if !isRetryable(err) {
 			return err
 		}
@@ -125,15 +155,18 @@ func (t *TxManager) SerializationRetries() int64 {
 	return t.serializationRetries.Load()
 }
 
-// run opens a transaction with opts, executes unitOfWork against it, and commits
-// or rolls back.
-func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork transaction.UnitOfWork) error {
+// run opens a transaction on client with opts, executes unitOfWork against it,
+// and commits or rolls back.
+func (t *TxManager) run(ctx context.Context, client Client, opts pgx.TxOptions, unitOfWork transaction.UnitOfWork) error {
 	// Nested calls join the ambient transaction instead of opening a second one.
+	// A read-only block nested inside a read-write one therefore stays on the
+	// primary: it is already reading what that transaction has written, and no
+	// standby has seen those rows yet.
 	if txExists(ctx) {
 		return unitOfWork(ctx)
 	}
 
-	tx, err := t.client.BeginTx(ctx, opts)
+	tx, err := client.BeginTx(ctx, opts)
 	if err != nil {
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
