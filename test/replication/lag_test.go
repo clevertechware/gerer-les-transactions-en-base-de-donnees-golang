@@ -9,9 +9,9 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/domain"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/logger"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/postgres"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/postgres"
 )
 
 // pauseReplay stops the standby from replaying WAL and resumes it on cleanup.

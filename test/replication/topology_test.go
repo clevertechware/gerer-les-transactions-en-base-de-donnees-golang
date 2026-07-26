@@ -22,9 +22,9 @@ import (
 	tcnetwork "github.com/testcontainers/testcontainers-go/network"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/config"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/migrate"
-	"github.com/clevertechware/handling-db-transactions-in-golang/internal/testutil"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/migrate"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/testutil"
 )
 
 const (
