@@ -7,7 +7,7 @@ import (
 
 	mock "github.com/stretchr/testify/mock"
 
-	service "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service"
+	service "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/service"
 
 	uuid "github.com/google/uuid"
 )

@@ -9,11 +9,11 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service/mocks"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction"
-	txmocks "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/pkg/transaction/mocks"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/service/mocks"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/pkg/transaction"
+	txmocks "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/pkg/transaction/mocks"
 )
 
 // TestVerifyBad_CallsTheProviderInsideTheTransaction states the defect in

@@ -7,8 +7,8 @@ import (
 	"github.com/google/uuid"
 	"github.com/jackc/pgerrcode"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 )
 
 // MembershipRepository reads and writes the association between users and

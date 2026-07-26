@@ -7,9 +7,9 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/google/uuid"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/service"
 )
 
 type onboardingService interface {

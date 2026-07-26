@@ -1,4 +1,4 @@
-module github.com/clevertechware/gerer-les-transactions-en-base-de-donnees
+module github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang
 
 go 1.26
 

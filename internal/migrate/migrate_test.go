@@ -7,8 +7,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/migrate"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/testutil"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/migrate"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/testutil"
 )
 
 func TestMain(m *testing.M) {

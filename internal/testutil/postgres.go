@@ -17,8 +17,8 @@ import (
 	"github.com/testcontainers/testcontainers-go"
 	tcpostgres "github.com/testcontainers/testcontainers-go/modules/postgres"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/migrate"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/migrate"
 )
 
 const (

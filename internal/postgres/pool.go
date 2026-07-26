@@ -8,7 +8,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/config"
 )
 
 // Executor is the subset of pgx satisfied by both a connection pool and an open

@@ -6,7 +6,7 @@ import (
 	"github.com/jackc/pgerrcode"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
 )
 
 // TestReadOnlyTransaction_RejectsWrite backs the article's first claim about

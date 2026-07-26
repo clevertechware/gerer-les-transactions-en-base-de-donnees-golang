@@ -5,7 +5,7 @@ package mocks
 import (
 	context "context"
 
-	logger "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
+	logger "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 	mock "github.com/stretchr/testify/mock"
 )
 

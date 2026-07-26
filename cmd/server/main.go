@@ -9,13 +9,13 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/gateway"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/handler"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/migrate"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/postgres"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/gateway"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/handler"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/migrate"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/postgres"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/service"
 )
 
 func main() {

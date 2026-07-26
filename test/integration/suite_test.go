@@ -18,13 +18,13 @@ import (
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
 
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/config"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/domain"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/gateway"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/logger"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/postgres"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/service"
-	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees/internal/testutil"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/config"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/gateway"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/postgres"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/service"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/testutil"
 )
 
 func TestMain(m *testing.M) {
