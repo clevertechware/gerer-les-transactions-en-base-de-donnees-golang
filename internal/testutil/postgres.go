@@ -166,6 +166,17 @@ func (p *Postgres) Port() string { return strconv.Itoa(p.Config.Port) }
 
 // migrationsDir locates the migrations folder by walking up to the module root.
 func migrationsDir() (string, error) {
+	root, err := ModuleRoot()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(root, "migrations"), nil
+}
+
+// ModuleRoot walks up from the working directory to the folder holding go.mod,
+// so a test can name a repository file without depending on which package
+// directory `go test` happens to run it from.
+func ModuleRoot() (string, error) {
 	dir, err := os.Getwd()
 	if err != nil {
 		return "", err
@@ -173,7 +184,7 @@ func migrationsDir() (string, error) {
 
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return filepath.Join(dir, "migrations"), nil
+			return dir, nil
 		}
 
 		parent := filepath.Dir(dir)
