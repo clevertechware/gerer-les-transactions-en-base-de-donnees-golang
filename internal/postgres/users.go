@@ -104,7 +104,7 @@ func (r *UserRepository) List(ctx context.Context) ([]domain.User, error) {
 		}
 		users = append(users, user)
 	}
-	if err := rows.Err(); err != nil {
+	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating users: %w", err)
 	}
 
@@ -134,7 +134,7 @@ func (r *UserRepository) ListByCompany(ctx context.Context, companyID uuid.UUID)
 		}
 		users = append(users, user)
 	}
-	if err := rows.Err(); err != nil {
+	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating members: %w", err)
 	}
 

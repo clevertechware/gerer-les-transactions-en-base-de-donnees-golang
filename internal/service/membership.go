@@ -35,15 +35,12 @@ func NewMembership(
 
 // AddMember adds a user to a company, refusing to exceed its seat limit.
 //
-// The invariant here is not enforceable by a constraint: it compares a count
-// against a column on another table. So the application has to defend it, and
-// the shape it takes — read a count, decide, then write — is exactly what breaks
-// under concurrency. Two callers on the last free seat both read "one left" and
-// both take it.
+// The invariant here is not enforceable by a constraint: it compares a count against a column on another table.
+// So the application has to defend it, and the shape it takes (read a count, decide, then write) is exactly what breaks
+// under concurrency. Two callers on the last free seat both read "one left" and both take it.
 //
-// READ COMMITTED would not catch that: each statement gets a fresh snapshot and
-// neither transaction sees the other's uncommitted insert. SERIALIZABLE does,
-// and pays for it by aborting one of them with SQLSTATE 40001 — which is not a
+// READ COMMITTED would not catch that: each statement gets a fresh snapshot and neither transaction sees the other's
+// uncommitted insert. SERIALIZABLE does, and pays for it by aborting one of them with SQLSTATE 40001 — which is not a
 // bug but the contract, and why this runs through ExecuteSerializable.
 func (s *Membership) AddMember(
 	ctx context.Context,

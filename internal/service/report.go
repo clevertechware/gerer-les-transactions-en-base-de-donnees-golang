@@ -44,21 +44,19 @@ func NewReport(
 	}
 }
 
-// CompanyReport assembles a company, its members and its seat count.
+// CompanyReport assembles a company, its members, and its seat count.
 //
-// This is the one read path in the demo that deserves a transaction, and it is
-// worth being precise about why. Not because reading needs protecting — a single
-// SELECT is fine on its own, which is why GetCompany and ListUsers open nothing.
-// It is because *three* reads have to agree with each other: without a shared
-// snapshot, a member added between the second and third query would make the
-// list and the count contradict, and the report would be visibly wrong.
+// This is the one-read path in the demo that deserves a transaction, and it is worth being precise about why.
 //
-// Note that READ COMMITTED would not fix that — it takes a fresh snapshot per
-// statement, so the two reads could still disagree. ExecuteReadOnly runs at
-// REPEATABLE READ for exactly this reason.
+// Not because reading needs protecting, a single SELECT is fine on its own, which is why GetCompany and ListUsers
+// open nothing. It is because *three* reads have to agree with each other: without a shared snapshot, a member added
+// between the second and third query would make the list and the count contradict, and the report would be visibly wrong.
 //
-// Declaring it READ ONLY buys two more things: PostgreSQL refuses any write that
-// slips in, and a routing layer may send the whole block to a replica.
+// Note that READ COMMITTED would not fix that. It takes a fresh snapshot per statement, so the two reads could still
+// disagree. ExecuteReadOnly runs at REPEATABLE READ for exactly this reason.
+//
+// Declaring it READ-ONLY buys two more things: PostgreSQL refuses any write that slips in, and a routing layer may
+// send the whole block to a replica.
 func (s *Report) CompanyReport(ctx context.Context, companyID uuid.UUID) (*CompanyReport, error) {
 	var report CompanyReport
 

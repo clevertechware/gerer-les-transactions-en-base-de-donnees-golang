@@ -10,8 +10,7 @@ import (
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 )
 
-// User handles plain CRUD on users. Like Company, it opens no transaction:
-// every method is a single statement.
+// User handles plain CRUD on users. Like Company, it opens no transaction: every method is a single statement.
 type User struct {
 	users  userRepository
 	logger logger.Logger
@@ -24,9 +23,10 @@ func NewUser(users userRepository, log logger.Logger) *User {
 
 // CreateUser inserts a user. Single INSERT, no transaction.
 //
-// Uniqueness of the email and the username is not checked here with a SELECT
-// first: that would be a read-then-write race, and the unique indexes already
-// decide. The repository turns the violation into a domain error.
+// The uniqueness of the email and the username are not checked here with a SELECT first:
+// that would be a read-then-write race, and the unique indexes already decide.
+//
+// The repository turns the violation into a domain error.
 func (s *User) CreateUser(ctx context.Context, user *domain.User) error {
 	if err := validateUser(user); err != nil {
 		return err

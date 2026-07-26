@@ -12,10 +12,10 @@ import (
 
 // Verification has a company verified by an external provider.
 //
-// It exposes the same operation twice: the way almost everyone writes it the
-// first time, and the way it should be written. The two differ by where the
-// network call sits relative to BEGIN — and that single detail is the difference
-// between a healthy database and an incident.
+// It exposes the same operation twice: the way almost everyone writes it the first time, and the way it should be written.
+//
+// The two differ by where the network call sits relative to BEGIN, and that single detail is the difference between
+// a healthy database and an incident.
 type Verification struct {
 	txManager transaction.Manager
 	companies companyRepository
@@ -46,15 +46,13 @@ func NewVerification(
 //	UPDATE ...
 //	COMMIT                         🔒 lock finally released
 //
-// It looks reasonable: lock the row, do the work, write the result. It passes
-// review, and it works perfectly in development where the provider answers in
-// milliseconds and nobody else touches that row.
+// It looks reasonable: lock the row, do the work, write the result. It passes review, and it works perfectly in
+// development where the provider answers in milliseconds and nobody else touches that row.
 //
-// In production it holds a row lock for the entire round trip. Every other
-// transaction wanting that company waits. The connection stays pinned as "idle
-// in transaction", so the pool drains. VACUUM cannot reclaim dead tuples that
-// this transaction might still see — across the whole database, not just this
-// table. A latency spike at the provider becomes contention everywhere.
+// In production, it holds a row lock for the entire round trip. Every other transaction wanting that company waits.
+// The connection stays pinned as "idle in transaction", so the pool drains. VACUUM cannot reclaim dead tuples that
+// this transaction might still see — across the whole database, not just this table.
+// A latency spike at the provider becomes contention everywhere.
 func (s *Verification) VerifyBad(ctx context.Context, companyID uuid.UUID) (*domain.Company, error) {
 	var verified *domain.Company
 
@@ -70,7 +68,7 @@ func (s *Verification) VerifyBad(ctx context.Context, companyID uuid.UUID) (*dom
 			return err
 		}
 
-		if err := s.companies.SetVerified(ctx, companyID, reference); err != nil {
+		if err = s.companies.SetVerified(ctx, companyID, reference); err != nil {
 			return err
 		}
 
@@ -91,15 +89,12 @@ func (s *Verification) VerifyBad(ctx context.Context, companyID uuid.UUID) (*dom
 //	UPDATE ... WHERE verification_status = 'pending'
 //	COMMIT                          ~2 ms
 //
-// Two changes carry all the benefit. The slow work happens before the write, so
-// no lock is held across it. And the UPDATE is conditional, which replaces the
-// explicit lock entirely: the predicate makes a replay a no-op and detects a
-// concurrent execution. Zero rows back means someone else already verified this
-// company, which the caller learns as a conflict rather than as a silent
-// double-write.
+// Two changes carry all the benefit. The slow work happens before the write, so no lock is held across it.
+// And the UPDATE is conditional, which replaces the explicit lock entirely: the predicate makes a replay a no-op and
+// detects a concurrent execution. Zero rows back means someone else already verified this company, which the caller
+// learns as a conflict rather than as a silent double-write.
 //
-// Note that the write is a single statement, so it needs no explicit
-// transaction at all — PostgreSQL commits it on its own.
+// Note that the writing is a single statement, so it needs no explicit transaction at all.
 func (s *Verification) VerifyGood(ctx context.Context, companyID uuid.UUID) (*domain.Company, error) {
 	// Read outside any transaction: one SELECT, nothing to keep consistent.
 	company, err := s.companies.GetByID(ctx, companyID)

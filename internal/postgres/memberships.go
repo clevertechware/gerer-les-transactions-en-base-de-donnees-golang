@@ -107,7 +107,7 @@ func (r *MembershipRepository) ListByCompany(ctx context.Context, companyID uuid
 		}
 		memberships = append(memberships, m)
 	}
-	if err := rows.Err(); err != nil {
+	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating memberships: %w", err)
 	}
 

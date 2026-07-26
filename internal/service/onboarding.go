@@ -8,8 +8,7 @@ import (
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/pkg/transaction"
 )
 
-// OnboardingInput is what the caller supplies to register a company together
-// with its first user.
+// OnboardingInput is what the caller supplies to register a company together with its first user.
 type OnboardingInput struct {
 	Company domain.Company
 	Owner   domain.User
@@ -17,10 +16,10 @@ type OnboardingInput struct {
 
 // Onboarding creates a company, its owner and the membership joining them.
 //
-// This is the case where a transaction is not optional. Three writes across
-// three tables carry one business invariant: a company always has an owner. A
-// company with no owner, or an owner with no company, is a state nobody should
-// ever observe — so the three rows appear together or not at all.
+// This is the case where a transaction is not optional. Three writes across three tables carry one business invariant:
+// a company always has an owner.
+// A company with no owner, or an owner with no company, is a state nobody should ever observe.
+// So the three rows appear together or not at all.
 type Onboarding struct {
 	txManager   transaction.Manager
 	companies   companyRepository
@@ -65,8 +64,7 @@ func (s *Onboarding) Execute(ctx context.Context, input OnboardingInput) (*domai
 
 	var result domain.Onboarding
 	err := s.txManager.Execute(ctx, func(ctx context.Context) error {
-		// Each repository call picks the ambient transaction out of ctx, so the
-		// three writes land in the same one.
+		// Each repository call picks the ambient transaction out of ctx, so the three writes land in the same one.
 		if err := s.companies.Create(ctx, &company); err != nil {
 			return err
 		}
@@ -87,13 +85,12 @@ func (s *Onboarding) Execute(ctx context.Context, input OnboardingInput) (*domai
 		return nil
 	})
 	if err != nil {
-		// Nothing was persisted: the rollback took the company and the user with
-		// it, even though each INSERT succeeded on its own.
+		// Nothing persisted: the rollback took the company and the user with it, even though each INSERT succeeded
+		// on its own.
 		s.logger.WarnContext(ctx, "onboarding rolled back", "company", company.Name, "error", err)
 		return nil, err
 	}
 
-	s.logger.InfoContext(ctx, "company onboarded",
-		"company_id", result.Company.ID, "owner_id", result.Owner.ID)
+	s.logger.InfoContext(ctx, "company onboarded", "company_id", result.Company.ID, "owner_id", result.Owner.ID)
 	return &result, nil
 }
