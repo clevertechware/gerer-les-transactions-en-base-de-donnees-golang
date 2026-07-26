@@ -28,19 +28,19 @@ type companyRequest struct {
 	SeatLimit int     `json:"seat_limit"`
 }
 
-// CompanyHandler exposes CRUD on companies. None of these routes opens a
+// HTTPCompanyHandler exposes CRUD on companies. None of these routes opens a
 // transaction: each is one statement.
-type CompanyHandler struct {
+type HTTPCompanyHandler struct {
 	service companyService
 	logger  logger.Logger
 }
 
-// NewCompanyHandler creates the company handler.
-func NewCompanyHandler(service companyService, log logger.Logger) *CompanyHandler {
-	return &CompanyHandler{service: service, logger: log}
+// NewHTTPCompanyHandler creates the company handler.
+func NewHTTPCompanyHandler(service companyService, log logger.Logger) *HTTPCompanyHandler {
+	return &HTTPCompanyHandler{service: service, logger: log}
 }
 
-func (h *CompanyHandler) Create(c *gin.Context) {
+func (h *HTTPCompanyHandler) Create(c *gin.Context) {
 	var req companyRequest
 	if !bindJSON(c, &req) {
 		return
@@ -55,7 +55,7 @@ func (h *CompanyHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, company)
 }
 
-func (h *CompanyHandler) Get(c *gin.Context) {
+func (h *HTTPCompanyHandler) Get(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -70,7 +70,7 @@ func (h *CompanyHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, company)
 }
 
-func (h *CompanyHandler) List(c *gin.Context) {
+func (h *HTTPCompanyHandler) List(c *gin.Context) {
 	companies, err := h.service.ListCompanies(c.Request.Context())
 	if err != nil {
 		respondError(c, h.logger, err)
@@ -80,7 +80,7 @@ func (h *CompanyHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, companies)
 }
 
-func (h *CompanyHandler) Update(c *gin.Context) {
+func (h *HTTPCompanyHandler) Update(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -100,7 +100,7 @@ func (h *CompanyHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, company)
 }
 
-func (h *CompanyHandler) Delete(c *gin.Context) {
+func (h *HTTPCompanyHandler) Delete(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return

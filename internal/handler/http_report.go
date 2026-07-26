@@ -15,21 +15,21 @@ type reportService interface {
 	CompanyReport(ctx context.Context, companyID uuid.UUID) (*service.CompanyReport, error)
 }
 
-// ReportHandler serves the read-only view of a company.
+// HTTPReportHandler serves the read-only view of a company.
 //
 // The one read endpoint that opens a transaction, because it runs three queries
 // that have to agree with each other.
-type ReportHandler struct {
+type HTTPReportHandler struct {
 	service reportService
 	logger  logger.Logger
 }
 
-// NewReportHandler creates the report handler.
-func NewReportHandler(svc reportService, log logger.Logger) *ReportHandler {
-	return &ReportHandler{service: svc, logger: log}
+// NewHTTPReportHandler creates the report handler.
+func NewHTTPReportHandler(svc reportService, log logger.Logger) *HTTPReportHandler {
+	return &HTTPReportHandler{service: svc, logger: log}
 }
 
-func (h *ReportHandler) Get(c *gin.Context) {
+func (h *HTTPReportHandler) Get(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return

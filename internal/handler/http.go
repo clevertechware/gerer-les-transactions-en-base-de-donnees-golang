@@ -18,14 +18,14 @@ type Pinger interface {
 	Ping(ctx context.Context) error
 }
 
-// Handlers groups the resource handlers the server routes to.
-type Handlers struct {
-	Company      *CompanyHandler
-	User         *UserHandler
-	Membership   *MembershipHandler
-	Onboarding   *OnboardingHandler
-	Verification *VerificationHandler
-	Report       *ReportHandler
+// HTTPHandlers groups the resource handlers the server routes to.
+type HTTPHandlers struct {
+	Company      *HTTPCompanyHandler
+	User         *HTTPUserHandler
+	Membership   *HTTPMembershipHandler
+	Onboarding   *HTTPOnboardingHandler
+	Verification *HTTPVerificationHandler
+	Report       *HTTPReportHandler
 }
 
 // HTTPServer owns the gin engine and the underlying http.Server, and bridges
@@ -35,13 +35,13 @@ type HTTPServer struct {
 	router          *gin.Engine
 	logger          logger.Logger
 	db              Pinger
-	handlers        Handlers
+	handlers        HTTPHandlers
 	shutdownTimeout time.Duration
 }
 
 // NewHTTPServer builds the server and registers every route. Routes are wired
 // here rather than in an exported method the caller has to remember to call.
-func NewHTTPServer(cfg config.Server, log logger.Logger, db Pinger, handlers Handlers) *HTTPServer {
+func NewHTTPServer(cfg config.Server, log logger.Logger, db Pinger, handlers HTTPHandlers) *HTTPServer {
 	gin.SetMode(ginMode(cfg.Mode))
 
 	router := gin.New()

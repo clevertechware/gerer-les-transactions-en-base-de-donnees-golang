@@ -47,13 +47,13 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 
 	tests := []struct {
 		name        string
-		call        func(*VerificationHandler, *gin.Context)
+		call        func(*HTTPVerificationHandler, *gin.Context)
 		expectSetup func(*mocks.VerificationService)
 		wantVariant string
 	}{
 		{
 			name: "verify-bad",
-			call: func(h *VerificationHandler, c *gin.Context) { h.Bad(c) },
+			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.Bad(c) },
 			expectSetup: func(s *mocks.VerificationService) {
 				s.EXPECT().VerifyBad(mock.Anything, companyID).Return(company, nil).Once()
 			},
@@ -61,7 +61,7 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 		},
 		{
 			name: "verify-good",
-			call: func(h *VerificationHandler, c *gin.Context) { h.Good(c) },
+			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.Good(c) },
 			expectSetup: func(s *mocks.VerificationService) {
 				s.EXPECT().VerifyGood(mock.Anything, companyID).Return(company, nil).Once()
 			},
@@ -76,7 +76,7 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 			service := mocks.NewVerificationService(t)
 			tt.expectSetup(service)
 
-			h := NewVerificationHandler(service, logger.NewNoOpLogger())
+			h := NewHTTPVerificationHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost,
 				"/api/companies/"+companyID.String()+"/"+tt.name, "",
 				gin.Params{{Key: "id", Value: companyID.String()}})
@@ -115,7 +115,7 @@ func TestVerificationHandler_MapsErrors(t *testing.T) {
 			service := mocks.NewVerificationService(t)
 			service.EXPECT().VerifyGood(mock.Anything, companyID).Return(nil, tt.serviceErr).Once()
 
-			h := NewVerificationHandler(service, logger.NewNoOpLogger())
+			h := NewHTTPVerificationHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/verify-good", "",
 				gin.Params{{Key: "id", Value: companyID.String()}})
 
@@ -132,7 +132,7 @@ func TestVerificationHandler_RejectsAMalformedID(t *testing.T) {
 	// No expectations: a bad path parameter must never reach the service.
 	service := mocks.NewVerificationService(t)
 
-	h := NewVerificationHandler(service, logger.NewNoOpLogger())
+	h := NewHTTPVerificationHandler(service, logger.NewNoOpLogger())
 	c, recorder := newTestContext(t, http.MethodPost, "/verify-good", "",
 		gin.Params{{Key: "id", Value: "not-a-uuid"}})
 
@@ -156,7 +156,7 @@ func TestCompanyHandler_IgnoresClientSuppliedVerificationState(t *testing.T) {
 			return nil
 		}).Once()
 
-	h := NewCompanyHandler(service, logger.NewNoOpLogger())
+	h := NewHTTPCompanyHandler(service, logger.NewNoOpLogger())
 	c, recorder := newTestContext(t, http.MethodPost, "/api/companies", `{
 		"name": "Sneaky SAS",
 		"verification_status": "verified",

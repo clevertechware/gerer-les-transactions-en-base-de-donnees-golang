@@ -66,13 +66,13 @@ func run() error {
 	reportService := service.NewReport(txManager, companyRepo, userRepo, membershipRepo, log)
 	verificationService := service.NewVerification(txManager, companyRepo, verificationGateway, log)
 
-	handlers := handler.Handlers{
-		Company:      handler.NewCompanyHandler(companyService, log),
-		User:         handler.NewUserHandler(userService, log),
-		Membership:   handler.NewMembershipHandler(membershipService, log),
-		Onboarding:   handler.NewOnboardingHandler(onboardingService, log),
-		Verification: handler.NewVerificationHandler(verificationService, log),
-		Report:       handler.NewReportHandler(reportService, log),
+	handlers := handler.HTTPHandlers{
+		Company:      handler.NewHTTPCompanyHandler(companyService, log),
+		User:         handler.NewHTTPUserHandler(userService, log),
+		Membership:   handler.NewHTTPMembershipHandler(membershipService, log),
+		Onboarding:   handler.NewHTTPOnboardingHandler(onboardingService, log),
+		Verification: handler.NewHTTPVerificationHandler(verificationService, log),
+		Report:       handler.NewHTTPReportHandler(reportService, log),
 	}
 
 	server := handler.NewHTTPServer(cfg.Server, log, pool, handlers)

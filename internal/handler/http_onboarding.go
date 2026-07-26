@@ -21,21 +21,21 @@ type onboardingRequest struct {
 	Owner   userRequest    `json:"owner"`
 }
 
-// OnboardingHandler registers a company together with its owner.
+// HTTPOnboardingHandler registers a company together with its owner.
 //
 // The one write endpoint in this demo that genuinely needs a transaction:
 // three rows, one invariant.
-type OnboardingHandler struct {
+type HTTPOnboardingHandler struct {
 	service onboardingService
 	logger  logger.Logger
 }
 
-// NewOnboardingHandler creates the onboarding handler.
-func NewOnboardingHandler(svc onboardingService, log logger.Logger) *OnboardingHandler {
-	return &OnboardingHandler{service: svc, logger: log}
+// NewHTTPOnboardingHandler creates the onboarding handler.
+func NewHTTPOnboardingHandler(svc onboardingService, log logger.Logger) *HTTPOnboardingHandler {
+	return &HTTPOnboardingHandler{service: svc, logger: log}
 }
 
-func (h *OnboardingHandler) Execute(c *gin.Context) {
+func (h *HTTPOnboardingHandler) Execute(c *gin.Context) {
 	var req onboardingRequest
 	if !bindJSON(c, &req) {
 		return

@@ -20,21 +20,21 @@ type membershipRequest struct {
 	Role string `json:"role"`
 }
 
-// MembershipHandler associates users with companies.
+// HTTPMembershipHandler associates users with companies.
 //
 // Adding a member runs under SERIALIZABLE with a retry, because the seat limit
 // is decided from a count that a concurrent insert can invalidate.
-type MembershipHandler struct {
+type HTTPMembershipHandler struct {
 	service membershipService
 	logger  logger.Logger
 }
 
-// NewMembershipHandler creates the membership handler.
-func NewMembershipHandler(svc membershipService, log logger.Logger) *MembershipHandler {
-	return &MembershipHandler{service: svc, logger: log}
+// NewHTTPMembershipHandler creates the membership handler.
+func NewHTTPMembershipHandler(svc membershipService, log logger.Logger) *HTTPMembershipHandler {
+	return &HTTPMembershipHandler{service: svc, logger: log}
 }
 
-func (h *MembershipHandler) Add(c *gin.Context) {
+func (h *HTTPMembershipHandler) Add(c *gin.Context) {
 	companyID, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -59,7 +59,7 @@ func (h *MembershipHandler) Add(c *gin.Context) {
 	c.JSON(http.StatusCreated, membership)
 }
 
-func (h *MembershipHandler) Remove(c *gin.Context) {
+func (h *HTTPMembershipHandler) Remove(c *gin.Context) {
 	companyID, ok := uuidParam(c, "id")
 	if !ok {
 		return

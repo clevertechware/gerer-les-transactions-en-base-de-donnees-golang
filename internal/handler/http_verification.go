@@ -17,32 +17,32 @@ type verificationService interface {
 	VerifyGood(ctx context.Context, companyID uuid.UUID) (*domain.Company, error)
 }
 
-// VerificationHandler exposes the same operation written two ways.
+// HTTPVerificationHandler exposes the same operation written two ways.
 //
 // Both call the same slow provider and produce the same row. They differ only in
 // where the network call sits relative to BEGIN — and that is the entire lesson.
 // Point a load generator at each and watch what happens to the other requests.
-type VerificationHandler struct {
+type HTTPVerificationHandler struct {
 	service verificationService
 	logger  logger.Logger
 }
 
-// NewVerificationHandler creates the verification handler.
-func NewVerificationHandler(svc verificationService, log logger.Logger) *VerificationHandler {
-	return &VerificationHandler{service: svc, logger: log}
+// NewHTTPVerificationHandler creates the verification handler.
+func NewHTTPVerificationHandler(svc verificationService, log logger.Logger) *HTTPVerificationHandler {
+	return &HTTPVerificationHandler{service: svc, logger: log}
 }
 
 // Bad holds a row lock across the provider call. ❌
-func (h *VerificationHandler) Bad(c *gin.Context) {
+func (h *HTTPVerificationHandler) Bad(c *gin.Context) {
 	h.verify(c, "bad", h.service.VerifyBad)
 }
 
 // Good calls the provider first, then writes with one conditional statement. ✅
-func (h *VerificationHandler) Good(c *gin.Context) {
+func (h *HTTPVerificationHandler) Good(c *gin.Context) {
 	h.verify(c, "good", h.service.VerifyGood)
 }
 
-func (h *VerificationHandler) verify(
+func (h *HTTPVerificationHandler) verify(
 	c *gin.Context,
 	variant string,
 	verify func(context.Context, uuid.UUID) (*domain.Company, error),

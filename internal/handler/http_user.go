@@ -37,18 +37,18 @@ func (r userRequest) toDomain(id uuid.UUID) domain.User {
 	}
 }
 
-// UserHandler exposes CRUD on users. Like companies, no transaction anywhere.
-type UserHandler struct {
+// HTTPUserHandler exposes CRUD on users. Like companies, no transaction anywhere.
+type HTTPUserHandler struct {
 	service userService
 	logger  logger.Logger
 }
 
-// NewUserHandler creates the user handler.
-func NewUserHandler(service userService, log logger.Logger) *UserHandler {
-	return &UserHandler{service: service, logger: log}
+// NewHTTPUserHandler creates the user handler.
+func NewHTTPUserHandler(service userService, log logger.Logger) *HTTPUserHandler {
+	return &HTTPUserHandler{service: service, logger: log}
 }
 
-func (h *UserHandler) Create(c *gin.Context) {
+func (h *HTTPUserHandler) Create(c *gin.Context) {
 	var req userRequest
 	if !bindJSON(c, &req) {
 		return
@@ -63,7 +63,7 @@ func (h *UserHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, user)
 }
 
-func (h *UserHandler) Get(c *gin.Context) {
+func (h *HTTPUserHandler) Get(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -78,7 +78,7 @@ func (h *UserHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
-func (h *UserHandler) List(c *gin.Context) {
+func (h *HTTPUserHandler) List(c *gin.Context) {
 	users, err := h.service.ListUsers(c.Request.Context())
 	if err != nil {
 		respondError(c, h.logger, err)
@@ -88,7 +88,7 @@ func (h *UserHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
-func (h *UserHandler) Update(c *gin.Context) {
+func (h *HTTPUserHandler) Update(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -108,7 +108,7 @@ func (h *UserHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
-func (h *UserHandler) Delete(c *gin.Context) {
+func (h *HTTPUserHandler) Delete(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
