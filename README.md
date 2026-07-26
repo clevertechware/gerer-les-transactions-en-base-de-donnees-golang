@@ -135,9 +135,25 @@ Le seuil ne bouge pas : **une transaction en lecture se justifie quand plusieurs
 - **La protection en écriture ne vient pas du `BEGIN`** mais de `default_transaction_read_only = on` posé sur la connexion vers le réplica. C'est un réglage de connexion : il couvre aussi l'autocommit.
 - **Ça coûte.** Deux aller-retours par lecture, et en pooling par transaction la connexion reste attachée pendant tout le bloc au lieu d'être rendue après chaque instruction.
 
-Ce que la réplication ajoute réellement : `SET TRANSACTION READ ONLY DEFERRABLE` sur un standby, qui attend un instantané sûr et évite l'annulation par le rejeu du WAL. Cela concerne les requêtes analytiques longues, pas un `GET /users/:id`.
+## La branche `feat/replication-routing`
 
-La branche `feat/replication-routing` en fera la démonstration exécutable (primaire + standby, routage des lectures, mesure du retard de réplication). `main` reste volontairement à un seul PostgreSQL.
+`main` reste volontairement à un seul PostgreSQL. La démonstration exécutable de tout ce qui précède vit sur la branche **[`feat/replication-routing`](../../tree/feat/replication-routing)**, qui n'a pas vocation à être fusionnée : elle existe pour être lue et exécutée.
+
+```bash
+git switch feat/replication-routing
+make db-up          # primaire 5432 + standby cloné par pg_basebackup, 5433
+make db-seed        # 200 000 sociétés, 100 000 users, 140 000 rattachements
+make test-integration
+```
+
+Elle ajoute un primaire + un standby dans `compose.yaml`, une option `postgres.WithReadReplica(pool)` qui route `ExecuteReadOnly` vers le standby, et un paquet `test/replication` qui **suspend le rejeu du WAL** (`pg_wal_replay_pause()`) pour rendre le retard déterministe plutôt que de courir après.
+
+`git diff main..feat/replication-routing` ne touche ni `internal/service`, ni `internal/handler`, ni `internal/domain` — le routage lecture/écriture est une décision d'infrastructure, et le fait que la couche métier ne bouge pas est le résultat, pas un détail.
+
+Deux choses que ces tests ont établies et qui corrigent l'intuition courante :
+
+- **Le `25006` ne vient pas du `BEGIN`.** Posé sur une connexion au *primaire*, sans réplication et sans transaction explicite, `default_transaction_read_only = on` refuse déjà un `INSERT` en autocommit. Et un standby refuse l'écriture même si la session remet le réglage à `off` : un serveur en *recovery* ne sait pas écrire.
+- **`DEFERRABLE` n'est pas un outil de standby** — l'inverse figurait ici même avant que les tests ne le démentent. `SERIALIZABLE READ ONLY DEFERRABLE` est rejeté sur un *hot standby* (`0A000`), et la forme sans `SERIALIZABLE` y est acceptée sans rien faire du tout (l'isolation reste `read committed`, or le mot-clé n'a d'effet que sous `SERIALIZABLE READ ONLY`). Ce qui protège une requête longue sur un réplica, ce sont `max_standby_streaming_delay` et `hot_standby_feedback`.
 
 ## Structure
 
