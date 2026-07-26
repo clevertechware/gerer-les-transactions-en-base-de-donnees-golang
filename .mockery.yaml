@@ -13,7 +13,7 @@ packages:
       Row:
       Rows:
 
-  github.com/clevertechware/gerer-les-transactions-en-base-de-donnees:
+  github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang:
     config:
       all: true
       recursive: true
