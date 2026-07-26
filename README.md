@@ -150,10 +150,7 @@ Elle ajoute un primaire + un standby dans `compose.yaml`, une option `postgres.W
 
 `git diff main..feat/replication-routing` ne touche ni `internal/service`, ni `internal/handler`, ni `internal/domain` — le routage lecture/écriture est une décision d'infrastructure, et le fait que la couche métier ne bouge pas est le résultat, pas un détail.
 
-Deux choses que ces tests ont établies et qui corrigent l'intuition courante :
-
-- **Le `25006` ne vient pas du `BEGIN`.** Posé sur une connexion au *primaire*, sans réplication et sans transaction explicite, `default_transaction_read_only = on` refuse déjà un `INSERT` en autocommit. Et un standby refuse l'écriture même si la session remet le réglage à `off` : un serveur en *recovery* ne sait pas écrire.
-- **`DEFERRABLE` n'est pas un outil de standby** — l'inverse figurait ici même avant que les tests ne le démentent. `SERIALIZABLE READ ONLY DEFERRABLE` est rejeté sur un *hot standby* (`0A000`), et la forme sans `SERIALIZABLE` y est acceptée sans rien faire du tout (l'isolation reste `read committed`, or le mot-clé n'a d'effet que sous `SERIALIZABLE READ ONLY`). Ce qui protège une requête longue sur un réplica, ce sont `max_standby_streaming_delay` et `hot_standby_feedback`.
+Ce que ces tests ont établi et qui corrige l'intuition courante : **le `25006` ne vient pas du `BEGIN`.** Posé sur une connexion au *primaire*, sans réplication et sans transaction explicite, `default_transaction_read_only = on` refuse déjà un `INSERT` en autocommit. Et un standby refuse l'écriture même si la session remet le réglage à `off` : un serveur en *recovery* ne sait pas écrire.
 
 ## Structure
 
