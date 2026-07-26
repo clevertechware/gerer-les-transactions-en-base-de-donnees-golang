@@ -70,6 +70,72 @@ func TestVerifyBad_CallsTheProviderInsideTheTransaction(t *testing.T) {
 	assert.Equal(t, []string{"begin", "lock", "provider", "update", "commit"}, calls)
 }
 
+// TestVerifyBad_PropagatesFailuresOutOfTheTransaction covers every step that
+// can fail inside VerifyBad's unit of work: whichever one does, its error must
+// come back out of Execute unchanged, and nothing past that step must run.
+func TestVerifyBad_PropagatesFailuresOutOfTheTransaction(t *testing.T) {
+	t.Parallel()
+
+	companyID := uuid.New()
+	company := &domain.Company{ID: companyID, Name: "Clevertechware"}
+
+	tests := []struct {
+		name    string
+		setup   func(*mocks.CompanyRepository, *mocks.VerificationGateway)
+		wantErr error
+	}{
+		{
+			name: "lock fails",
+			setup: func(companies *mocks.CompanyRepository, _ *mocks.VerificationGateway) {
+				companies.EXPECT().LockForUpdate(mock.Anything, companyID).Return(nil, domain.ErrCompanyNotFound).Once()
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+		{
+			name: "provider fails",
+			setup: func(companies *mocks.CompanyRepository, gateway *mocks.VerificationGateway) {
+				companies.EXPECT().LockForUpdate(mock.Anything, companyID).Return(company, nil).Once()
+				gateway.EXPECT().Verify(mock.Anything, company.Name).Return("", domain.ErrVerificationUnavailable).Once()
+			},
+			wantErr: domain.ErrVerificationUnavailable,
+		},
+		{
+			name: "set verified fails",
+			setup: func(companies *mocks.CompanyRepository, gateway *mocks.VerificationGateway) {
+				companies.EXPECT().LockForUpdate(mock.Anything, companyID).Return(company, nil).Once()
+				gateway.EXPECT().Verify(mock.Anything, company.Name).Return("VRF-1", nil).Once()
+				companies.EXPECT().SetVerified(mock.Anything, companyID, "VRF-1").Return(domain.ErrVerificationConflict).Once()
+			},
+			wantErr: domain.ErrVerificationConflict,
+		},
+		{
+			name: "trailing read fails",
+			setup: func(companies *mocks.CompanyRepository, gateway *mocks.VerificationGateway) {
+				companies.EXPECT().LockForUpdate(mock.Anything, companyID).Return(company, nil).Once()
+				gateway.EXPECT().Verify(mock.Anything, company.Name).Return("VRF-1", nil).Once()
+				companies.EXPECT().SetVerified(mock.Anything, companyID, "VRF-1").Return(nil).Once()
+				companies.EXPECT().GetByID(mock.Anything, companyID).Return(nil, domain.ErrCompanyNotFound).Once()
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			companies := mocks.NewCompanyRepository(t)
+			gateway := mocks.NewVerificationGateway(t)
+			tt.setup(companies, gateway)
+
+			svc := NewVerification(passThroughManager(t), companies, gateway, logger.NewNoOpLogger())
+
+			_, err := svc.VerifyBad(t.Context(), companyID)
+			assert.ErrorIs(t, err, tt.wantErr)
+		})
+	}
+}
+
 // TestVerifyGood_CallsTheProviderOutsideAnyTransaction is the corrected
 // sequence, and the assertion that matters most in this file: the transaction
 // manager is never touched at all.
