@@ -1,5 +1,5 @@
-// Package gateway holds the clients for the external systems this service talks
-// to. There is exactly one, and it is deliberately slow.
+// Package gateway holds the clients for the external systems this service talks to.
+// There is exactly one, and it is deliberately slow.
 package gateway
 
 import (
@@ -75,7 +75,7 @@ func (g *Verification) Verify(ctx context.Context, companyName string) (string, 
 	}
 
 	var verified verifyResponse
-	if err := json.NewDecoder(resp.Body).Decode(&verified); err != nil {
+	if err = json.NewDecoder(resp.Body).Decode(&verified); err != nil {
 		return "", fmt.Errorf("%w: decoding response: %w", domain.ErrVerificationUnavailable, err)
 	}
 	if verified.Reference == "" {

@@ -45,6 +45,8 @@ func writeConfig(t *testing.T, content string) string {
 }
 
 func TestLoad(t *testing.T) {
+	t.Parallel()
+
 	dir := writeConfig(t, validConfig)
 
 	cfg, err := Load(dir)
@@ -78,6 +80,8 @@ func TestLoad_EnvironmentOverridesTheFile(t *testing.T) {
 }
 
 func TestLoad_Validation(t *testing.T) {
+	t.Parallel()
+
 	tests := []struct {
 		name    string
 		config  string
@@ -119,6 +123,8 @@ remote: {base_url: ""}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
 			dir := t.TempDir()
 			if tt.config != "" {
 				require.NoError(t, os.WriteFile(filepath.Join(dir, configFileName), []byte(tt.config), 0o600))

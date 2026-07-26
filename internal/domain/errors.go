@@ -4,33 +4,36 @@ import "errors"
 
 var (
 	// Lookup failures.
-	ErrCompanyNotFound    = errors.New("company not found")
-	ErrUserNotFound       = errors.New("user not found")
+
+	// ErrCompanyNotFound indicates that the specified company could not be found.
+	ErrCompanyNotFound = errors.New("company not found")
+	// ErrUserNotFound indicates that the specified user could not be found.
+	ErrUserNotFound = errors.New("user not found")
+	// ErrMembershipNotFound indicates that the specified membership could not be found.
 	ErrMembershipNotFound = errors.New("membership not found")
 
 	// Uniqueness failures, translated from the constraints in the schema.
-	ErrEmailAlreadyExists    = errors.New("email already exists")
+
+	// ErrEmailAlreadyExists indicates that the given email already exists in the system.
+	ErrEmailAlreadyExists = errors.New("email already exists")
+	// ErrUsernameAlreadyExists indicates that the given username already exists in the system.
 	ErrUsernameAlreadyExists = errors.New("username already exists")
-	ErrMembershipExists      = errors.New("user already belongs to this company")
+	// ErrMembershipExists indicates that the user is already a member of the specified company.
+	ErrMembershipExists = errors.New("user already belongs to this company")
 
 	// Business rules.
+
+	// ErrSeatLimitReached indicates that the company has reached its maximum allowed seat limit.
 	ErrSeatLimitReached = errors.New("company has reached its seat limit")
-	ErrInvalidInput     = errors.New("invalid input")
-
-	// ErrVerificationConflict means the conditional UPDATE matched no row:
-	// another execution already verified this company. It is what replaces an
-	// explicit lock on the corrected verification path.
+	// ErrInvalidInput indicates that the provided input is invalid.
+	ErrInvalidInput = errors.New("invalid input")
+	// ErrVerificationConflict indicates that the company is no longer pending verification due to a conflict.
 	ErrVerificationConflict = errors.New("company is no longer pending verification")
-
-	// ErrVerificationUnavailable means the external provider could not be
-	// reached, or answered with something unusable.
+	// ErrVerificationUnavailable indicates that the verification provider could not be reached or provided unusable data.
 	ErrVerificationUnavailable = errors.New("verification provider unavailable")
 
-	// ErrTransactionRequired is returned by the few queries that are meaningless
-	// outside a transaction, such as SELECT ... FOR UPDATE.
+	// ErrTransactionRequired indicates that the operation requires an open transaction to execute.
 	ErrTransactionRequired = errors.New("operation requires an open transaction")
-
-	// ErrSerializationFailure means PostgreSQL aborted the transaction and we
-	// exhausted our retries. Under SERIALIZABLE this is the contract, not a bug.
+	// ErrSerializationFailure indicates the transaction could not be serialized and all retry attempts were exhausted.
 	ErrSerializationFailure = errors.New("could not serialize access")
 )

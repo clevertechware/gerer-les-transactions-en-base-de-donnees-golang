@@ -239,9 +239,8 @@ func (s *RepositorySuite) TestMembership_DuplicateIsRejected() {
 	assert.ErrorIs(t, s.memberships.Add(ctx, &valid), domain.ErrMembershipExists)
 }
 
-// TestRepositories_WorkWithoutATransaction is the point of the Executor
-// indirection: the same code that ran inside a transaction above also runs in
-// autocommit, so single-statement operations never need a BEGIN.
+// TestRepositories_WorkWithoutATransaction is the point of the Executor indirection: the same code that ran inside
+// a transaction above also runs in autocommit, so single-statement operations never need a BEGIN.
 func (s *RepositorySuite) TestRepositories_WorkWithoutATransaction() {
 	t := s.T()
 	ctx := t.Context()

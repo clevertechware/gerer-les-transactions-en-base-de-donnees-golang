@@ -21,9 +21,9 @@ import (
 type txKey struct{}
 
 const (
-	// serializableMaxAttempts bounds how many times a serialization failure is
-	// replayed. Under SERIALIZABLE, error 40001 is the contract, not a bug — but
-	// retrying forever would turn a hot row into a livelock.
+	// serializableMaxAttempts bounds how many times a serialization failure is replayed.
+	// Under SERIALIZABLE, error 40001 is the contract, not a bug.
+	// Retrying forever would turn a hot row into a livelock.
 	serializableMaxAttempts = 3
 	serializableBaseBackoff = 5 * time.Millisecond
 )
@@ -70,20 +70,17 @@ func (t *TxManager) RequireTx(ctx context.Context) (pgx.Tx, error) {
 	return nil, domain.ErrTransactionRequired
 }
 
-// Execute runs unitOfWork in a read-write transaction at the default isolation
-// level.
+// Execute runs unitOfWork in a read-write transaction at the default isolation level.
 func (t *TxManager) Execute(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
 	return t.run(ctx, pgx.TxOptions{}, unitOfWork)
 }
 
-// ExecuteReadOnly runs unitOfWork in an explicitly read-only transaction whose
-// reads all observe the same snapshot.
+// ExecuteReadOnly runs unitOfWork in an explicitly read-only transaction whose reads all observe the same snapshot.
 //
 // REPEATABLE READ, not READ COMMITTED, and the distinction is the entire point.
-// Under READ COMMITTED every statement takes a *fresh* snapshot, so two SELECTs
-// in one transaction can legitimately disagree — which would defeat the only
-// reason to open a transaction for reading. REPEATABLE READ freezes the snapshot
-// at the first query.
+// Under READ COMMITTED every statement takes a *fresh* snapshot, so two SELECTs in one transaction can legitimately
+// disagree, which would defeat the only reason to open a transaction for reading.
+// REPEATABLE READ freezes the snapshot at the first query.
 //
 // AccessMode ReadOnly adds the safety net: PostgreSQL rejects any write with
 // SQLSTATE 25006, and a routing layer may send the whole block to a replica.
@@ -94,8 +91,7 @@ func (t *TxManager) ExecuteReadOnly(ctx context.Context, unitOfWork transaction.
 	}, unitOfWork)
 }
 
-// ExecuteSerializable runs unitOfWork under SERIALIZABLE isolation and replays
-// it on a serialization failure.
+// ExecuteSerializable runs unitOfWork under SERIALIZABLE isolation and replays it on a serialization failure.
 func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
 	// Joining an ambient transaction rules out retrying: the caller owns the
 	// boundary, and replaying only our part of it would be wrong.
@@ -160,7 +156,7 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 		return err
 	}
 
-	if err := tx.Commit(ctx); err != nil {
+	if err = tx.Commit(ctx); err != nil {
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 

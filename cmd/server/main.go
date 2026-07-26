@@ -27,10 +27,8 @@ func main() {
 }
 
 func run() error {
-	var (
-		configDir      = flag.String("config", ".", "directory containing application.yaml")
-		migrationsPath = flag.String("migrations", "migrations", "directory containing the SQL migrations")
-	)
+	configDir := flag.String("config", ".", "directory containing application.yaml")
+	migrationsPath := flag.String("migrations", "migrations", "directory containing the SQL migrations")
 	flag.Parse()
 
 	cfg, err := config.Load(*configDir)
@@ -39,12 +37,10 @@ func run() error {
 	}
 
 	log := logger.New(cfg.Logging)
-
-	// Cancelled on SIGINT/SIGTERM, which is what triggers the graceful shutdown.
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	if err := migrate.Up(cfg.Postgres, *migrationsPath); err != nil {
+	if err = migrate.Up(cfg.Postgres, *migrationsPath); err != nil {
 		return err
 	}
 	log.InfoContext(ctx, "migrations applied")
@@ -55,10 +51,6 @@ func run() error {
 	}
 	defer pool.Close()
 	log.InfoContext(ctx, "connected to database", "database", cfg.Postgres.Database)
-
-	// Manual dependency injection, top to bottom: transaction manager,
-	// repositories, services, handlers. No container, no reflection — the graph
-	// is exactly what you read here.
 	txManager := postgres.NewTxManager(log, pool)
 
 	companyRepo := postgres.NewCompanyRepository(txManager, log)
@@ -83,5 +75,6 @@ func run() error {
 		Report:       handler.NewReportHandler(reportService, log),
 	}
 
-	return handler.NewHTTPServer(cfg.Server, log, pool, handlers).Run(ctx)
+	server := handler.NewHTTPServer(cfg.Server, log, pool, handlers)
+	return server.Run(ctx)
 }
