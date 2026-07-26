@@ -5,8 +5,11 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/testutil"
 )
@@ -58,4 +61,60 @@ func (s *RepositorySuite) txContext(t *testing.T) context.Context {
 	})
 
 	return contextWithTx(ctx, tx)
+}
+
+// seedCompanyAndUser inserts one company and one user in a fresh transaction and
+// returns it along with their identifiers.
+func (s *RepositorySuite) seedCompanyAndUser(t *testing.T) (ctx context.Context, companyID, userID uuid.UUID) {
+	t.Helper()
+
+	ctx = s.txContext(t)
+
+	company := &domain.Company{Name: "Host", SeatLimit: 3}
+	require.NoError(t, s.companies.Create(ctx, company))
+
+	user := &domain.User{FirstName: "Alan", LastName: "Turing", Email: "alan@example.com", Username: "alan"}
+	require.NoError(t, s.users.Create(ctx, user))
+
+	return ctx, company.ID, user.ID
+}
+
+// TestRepositories_WorkWithoutATransaction is the point of the Executor
+// indirection: the same code that runs inside a transaction elsewhere also runs
+// in autocommit, so single-statement operations never need a BEGIN. It spans all
+// three repositories because that guarantee is about the suite as a whole, not
+// any one of them.
+func (s *RepositorySuite) TestRepositories_WorkWithoutATransaction() {
+	t := s.T()
+	ctx := t.Context()
+
+	company := &domain.Company{Name: "autocommit-" + t.Name(), SeatLimit: 2}
+	require.NoError(t, s.companies.Create(ctx, company))
+
+	user := &domain.User{
+		FirstName: "Autocommit", LastName: "User",
+		Email: "autocommit-" + t.Name() + "@example.com", Username: "autocommit-" + t.Name(),
+	}
+	require.NoError(t, s.users.Create(ctx, user))
+
+	t.Cleanup(func() {
+		// Detached: t.Context() is cancelled before cleanup runs, so passing it
+		// here would make the DELETE a silent no-op. Deleting the company and the
+		// user cascades to any membership between them.
+		cleanupCtx := context.WithoutCancel(ctx)
+		_, _ = s.pg.Pool.Exec(cleanupCtx, `DELETE FROM companies WHERE id = $1`, company.ID)
+		_, _ = s.pg.Pool.Exec(cleanupCtx, `DELETE FROM users WHERE id = $1`, user.ID)
+	})
+
+	gotCompany, err := s.companies.GetByID(ctx, company.ID)
+	require.NoError(t, err)
+	assert.Equal(t, company.ID, gotCompany.ID)
+
+	gotUser, err := s.users.GetByID(ctx, user.ID)
+	require.NoError(t, err)
+	assert.Equal(t, user.ID, gotUser.ID)
+
+	membership := domain.Membership{CompanyID: company.ID, UserID: user.ID, Role: domain.RoleMember}
+	require.NoError(t, s.memberships.Add(ctx, &membership))
+	require.NoError(t, s.memberships.Remove(ctx, company.ID, user.ID))
 }
