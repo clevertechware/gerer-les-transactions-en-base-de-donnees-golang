@@ -19,9 +19,6 @@ type companyService interface {
 	DeleteCompany(ctx context.Context, id uuid.UUID) error
 }
 
-// companyRequest is the writable shape of a company. Binding the domain entity
-// directly would let a caller set its own id, timestamps, or — worse — declare
-// itself verified without ever talking to the provider.
 type companyRequest struct {
 	Name      string  `json:"name"`
 	Address   *string `json:"address"`
