@@ -28,12 +28,9 @@ func NewMembershipRepository(txManager *TxManager, log logger.Logger) *Membershi
 // The primary key and the two foreign keys do the checking here — the
 // application never has to ask "does this user exist?" before inserting.
 func (r *MembershipRepository) Add(ctx context.Context, membership *domain.Membership) error {
-	const query = `
-		INSERT INTO user_companies (user_id, company_id, role)
-		VALUES ($1, $2, $3)`
+	const query = "INSERT INTO user_companies (user_id, company_id, role) VALUES ($1, $2, $3)"
 
-	_, err := r.txManager.Executor(ctx).
-		Exec(ctx, query, membership.UserID, membership.CompanyID, membership.Role)
+	_, err := r.txManager.Executor(ctx).Exec(ctx, query, membership.UserID, membership.CompanyID, membership.Role)
 	if err != nil {
 		pgErr, ok := pgError(err)
 		if !ok {
@@ -72,10 +69,10 @@ func (r *MembershipRepository) Remove(ctx context.Context, companyID, userID uui
 
 // CountByCompany returns how many members a company has.
 //
-// Read on its own it is harmless. Combined with a subsequent insert to enforce
-// the seat limit, it becomes the classic read-then-write anomaly: two concurrent
-// callers both read "one seat left" and both take it. That is why the service
-// runs the pair under SERIALIZABLE.
+// Read on its own it is harmless. Combined with a subsequent insert to enforce the seat limit, it becomes the classic
+// read-then-write anomaly: two concurrent callers both read "one seat left" and both take it.
+//
+// That is why the service runs the pair under SERIALIZABLE.
 func (r *MembershipRepository) CountByCompany(ctx context.Context, companyID uuid.UUID) (int, error) {
 	const query = `SELECT count(*) FROM user_companies WHERE company_id = $1`
 

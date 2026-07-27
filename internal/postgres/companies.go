@@ -57,9 +57,7 @@ func (r *CompanyRepository) Create(ctx context.Context, company *domain.Company)
 
 // GetByID returns a company, or ErrCompanyNotFound.
 func (r *CompanyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Company, error) {
-	const query = `SELECT ` + companyColumns + `
-		FROM companies WHERE id = $1 AND deleted_at IS NULL`
-
+	const query = "SELECT " + companyColumns + " FROM companies WHERE id = $1 AND deleted_at IS NULL"
 	company, err := scanCompany(r.txManager.Executor(ctx).QueryRow(ctx, query, id))
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -67,14 +65,12 @@ func (r *CompanyRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.
 		}
 		return nil, fmt.Errorf("selecting company %s: %w", id, err)
 	}
-
 	return &company, nil
 }
 
 // List returns every live company.
 func (r *CompanyRepository) List(ctx context.Context) ([]domain.Company, error) {
-	const query = `SELECT ` + companyColumns + `
-		FROM companies WHERE deleted_at IS NULL ORDER BY created_at`
+	const query = "SELECT " + companyColumns + " FROM companies WHERE deleted_at IS NULL ORDER BY created_at"
 
 	rows, err := r.txManager.Executor(ctx).Query(ctx, query)
 	if err != nil {
@@ -90,7 +86,7 @@ func (r *CompanyRepository) List(ctx context.Context) ([]domain.Company, error) 
 		}
 		companies = append(companies, company)
 	}
-	if err := rows.Err(); err != nil {
+	if err = rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterating companies: %w", err)
 	}
 
@@ -120,10 +116,7 @@ func (r *CompanyRepository) Update(ctx context.Context, company *domain.Company)
 
 // Delete soft-deletes a company.
 func (r *CompanyRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	const query = `
-		UPDATE companies SET deleted_at = now(), updated_at = now()
-		WHERE id = $1 AND deleted_at IS NULL`
-
+	const query = "UPDATE companies SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL"
 	tag, err := r.txManager.Executor(ctx).Exec(ctx, query, id)
 	if err != nil {
 		return fmt.Errorf("deleting company %s: %w", id, err)
@@ -131,16 +124,13 @@ func (r *CompanyRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if tag.RowsAffected() == 0 {
 		return domain.ErrCompanyNotFound
 	}
-
 	return nil
 }
 
-// LockForUpdate reads a company and holds a row lock until the end of the
-// transaction.
+// LockForUpdate reads a company and holds a row lock until the end of the transaction.
 //
-// Used only by the broken verification path, to show what it costs. The lock is
-// released at COMMIT, so anything the caller does before then — a network call,
-// say — is time every concurrent writer of this row spends waiting.
+// Used only by the broken verification path to show what it costs. The lock is released at COMMIT, so anything the
+// caller does before then a network call is time every concurrent writer of this row spends waiting.
 func (r *CompanyRepository) LockForUpdate(ctx context.Context, id uuid.UUID) (*domain.Company, error) {
 	// Outside a transaction the lock would be released immediately and protect
 	// nothing, so refuse rather than silently do nothing useful.
@@ -166,8 +156,8 @@ func (r *CompanyRepository) LockForUpdate(ctx context.Context, id uuid.UUID) (*d
 
 // SetVerified marks a company verified unconditionally.
 //
-// The naive write of the broken path: it assumes nothing changed since the row
-// was read, which is only true because a lock has been held all along.
+// The naive write of the broken path: it assumes nothing changed since the row was read, which is only true because
+// a lock has been held all along.
 func (r *CompanyRepository) SetVerified(ctx context.Context, id uuid.UUID, reference string) error {
 	const query = `
 		UPDATE companies

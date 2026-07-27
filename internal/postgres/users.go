@@ -51,13 +51,10 @@ func translateUserConflict(err error) error {
 
 // Create inserts a user. A single statement: it needs no transaction.
 func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
-	const query = `
-		INSERT INTO users (first_name, last_name, email, username)
-		VALUES ($1, $2, $3, $4)
-		RETURNING ` + userColumns
-
-	created, err := scanUser(r.txManager.Executor(ctx).
-		QueryRow(ctx, query, user.FirstName, user.LastName, user.Email, user.Username))
+	const query = "INSERT INTO users (first_name, last_name, email, username) VALUES ($1, $2, $3, $4) RETURNING " +
+		userColumns
+	row := r.txManager.Executor(ctx).QueryRow(ctx, query, user.FirstName, user.LastName, user.Email, user.Username)
+	created, err := scanUser(row)
 	if err != nil {
 		if conflict := translateUserConflict(err); conflict != nil {
 			return conflict
@@ -71,10 +68,9 @@ func (r *UserRepository) Create(ctx context.Context, user *domain.User) error {
 
 // GetByID returns a user, or ErrUserNotFound.
 func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.User, error) {
-	const query = `SELECT ` + userColumns + `
-		FROM users WHERE id = $1 AND deleted_at IS NULL`
-
-	user, err := scanUser(r.txManager.Executor(ctx).QueryRow(ctx, query, id))
+	const query = "SELECT " + userColumns + " FROM users WHERE id = $1 AND deleted_at IS NULL"
+	row := r.txManager.Executor(ctx).QueryRow(ctx, query, id)
+	user, err := scanUser(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, domain.ErrUserNotFound
@@ -87,8 +83,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 
 // List returns every live user.
 func (r *UserRepository) List(ctx context.Context) ([]domain.User, error) {
-	const query = `SELECT ` + userColumns + `
-		FROM users WHERE deleted_at IS NULL ORDER BY created_at`
+	const query = "SELECT " + userColumns + "FROM users WHERE deleted_at IS NULL ORDER BY created_at"
 
 	rows, err := r.txManager.Executor(ctx).Query(ctx, query)
 	if err != nil {
@@ -115,8 +110,7 @@ func (r *UserRepository) List(ctx context.Context) ([]domain.User, error) {
 func (r *UserRepository) ListByCompany(ctx context.Context, companyID uuid.UUID) ([]domain.User, error) {
 	const query = `
 		SELECT u.id, u.first_name, u.last_name, u.email, u.username, u.created_at, u.updated_at
-		FROM users u
-		JOIN user_companies uc ON uc.user_id = u.id
+		FROM users u JOIN user_companies uc ON uc.user_id = u.id
 		WHERE uc.company_id = $1 AND u.deleted_at IS NULL
 		ORDER BY uc.role, u.last_name`
 
@@ -167,9 +161,7 @@ func (r *UserRepository) Update(ctx context.Context, user *domain.User) error {
 
 // Delete soft-deletes a user.
 func (r *UserRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	const query = `
-		UPDATE users SET deleted_at = now(), updated_at = now()
-		WHERE id = $1 AND deleted_at IS NULL`
+	const query = "UPDATE users SET deleted_at = now(), updated_at = now() WHERE id = $1 AND deleted_at IS NULL"
 
 	tag, err := r.txManager.Executor(ctx).Exec(ctx, query, id)
 	if err != nil {

@@ -46,8 +46,7 @@ func (s *RepositorySuite) SetupSuite() {
 	s.memberships = NewMembershipRepository(s.txManager, log)
 }
 
-// txContext returns a context carrying an open transaction, rolled back when the
-// test ends.
+// txContext returns a context carrying an open transaction, rolled back when the test ends.
 func (s *RepositorySuite) txContext(t *testing.T) context.Context {
 	t.Helper()
 
@@ -72,10 +71,8 @@ func (s *RepositorySuite) seedCompanyAndUser(t *testing.T) (ctx context.Context,
 
 	company := &domain.Company{Name: "Host", SeatLimit: 3}
 	require.NoError(t, s.companies.Create(ctx, company))
-
 	user := &domain.User{FirstName: "Alan", LastName: "Turing", Email: "alan@example.com", Username: "alan"}
 	require.NoError(t, s.users.Create(ctx, user))
-
 	return ctx, company.ID, user.ID
 }
 
@@ -90,7 +87,6 @@ func (s *RepositorySuite) TestRepositories_WorkWithoutATransaction() {
 
 	company := &domain.Company{Name: "autocommit-" + t.Name(), SeatLimit: 2}
 	require.NoError(t, s.companies.Create(ctx, company))
-
 	user := &domain.User{
 		FirstName: "Autocommit", LastName: "User",
 		Email: "autocommit-" + t.Name() + "@example.com", Username: "autocommit-" + t.Name(),

@@ -47,9 +47,7 @@ func TestSeatLimit_HoldsUnderConcurrency(t *testing.T) {
 
 	start := make(chan struct{})
 	for i := range racers {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			<-start
 
 			_, err := s.membership.AddMember(context.Background(), company.ID, users[i].ID, domain.RoleMember)
@@ -64,7 +62,7 @@ func TestSeatLimit_HoldsUnderConcurrency(t *testing.T) {
 			default:
 				other = append(other, err)
 			}
-		}()
+		})
 	}
 
 	close(start)
@@ -115,9 +113,7 @@ func TestExecuteSerializable_ReplaysARealSerializationFailure(t *testing.T) {
 	)
 
 	for i, candidate := range candidates {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 
 			// Only the first attempt waits at the barrier; a replay must not.
 			var once sync.Once
@@ -141,7 +137,7 @@ func TestExecuteSerializable_ReplaysARealSerializationFailure(t *testing.T) {
 				})
 			})
 			assert.NoError(t, err, "transaction %d should succeed, on a replay if need be", i)
-		}()
+		})
 	}
 
 	wg.Wait()
@@ -225,9 +221,9 @@ func TestOnboarding_CommitsAllThreeRows(t *testing.T) {
 	assert.Equal(t, domain.RoleOwner, memberships[0].Role)
 }
 
-// TestReport_AgreesWithItselfWhileTheDataChanges is the read-side claim: the
-// three queries behind a report share one snapshot, so the member list and the
-// count cannot contradict each other even while members are being added.
+// TestReport_AgreesWithItselfWhileTheDataChanges is the read-side claim:
+// the three queries behind a report share one snapshot, so the member list and
+// the count cannot contradict each other even while members are being added.
 func TestReport_AgreesWithItselfWhileTheDataChanges(t *testing.T) {
 	provider := newSlowProvider(t, time.Millisecond)
 	s := newStack(t, provider)

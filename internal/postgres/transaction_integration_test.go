@@ -106,8 +106,7 @@ func (s *RepositorySuite) TestExecute_RollsBackEveryWrite() {
 			return err
 		}
 
-		// A membership pointing at a company that does not exist: the foreign
-		// key rejects it, and the two successful inserts above go with it.
+		// A membership pointing at a company that does not exist 👉 the foreign key rejects it so nothing exists.
 		return s.memberships.Add(txCtx, &domain.Membership{
 			UserID:    user.ID,
 			CompanyID: uuidNotInDatabase,
@@ -118,11 +117,11 @@ func (s *RepositorySuite) TestExecute_RollsBackEveryWrite() {
 	require.ErrorIs(t, err, domain.ErrCompanyNotFound)
 
 	var companies, users int
-	require.NoError(t, s.pg.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM companies WHERE name = $1`, name).Scan(&companies))
-	require.NoError(t, s.pg.Pool.QueryRow(ctx,
-		`SELECT count(*) FROM users WHERE email = $1`, email).Scan(&users))
-
+	err = s.pg.Pool.QueryRow(ctx, `SELECT count(*) FROM companies WHERE name = $1`, name).Scan(&companies)
+	require.NoError(t, err)
 	require.Zero(t, companies, "the company insert should have been rolled back")
+	err = s.pg.Pool.QueryRow(ctx, `SELECT count(*) FROM users WHERE email = $1`, email).Scan(&users)
+	require.NoError(t, err)
 	require.Zero(t, users, "the user insert should have been rolled back")
+
 }

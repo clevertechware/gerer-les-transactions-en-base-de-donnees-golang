@@ -78,8 +78,7 @@ type stack struct {
 	verification *service.Verification
 }
 
-// newStack builds the dependency graph exactly as cmd/server does, pointed at
-// the given provider.
+// newStack builds the dependency graph exactly as cmd/server does, pointed at the given provider.
 func newStack(t *testing.T, provider *slowProvider) *stack {
 	t.Helper()
 

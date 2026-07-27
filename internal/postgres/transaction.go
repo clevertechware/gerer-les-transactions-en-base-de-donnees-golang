@@ -85,16 +85,12 @@ func (t *TxManager) Execute(ctx context.Context, unitOfWork transaction.UnitOfWo
 // AccessMode ReadOnly adds the safety net: PostgreSQL rejects any write with
 // SQLSTATE 25006, and a routing layer may send the whole block to a replica.
 func (t *TxManager) ExecuteReadOnly(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
-	return t.run(ctx, pgx.TxOptions{
-		IsoLevel:   pgx.RepeatableRead,
-		AccessMode: pgx.ReadOnly,
-	}, unitOfWork)
+	return t.run(ctx, pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly}, unitOfWork)
 }
 
 // ExecuteSerializable runs unitOfWork under SERIALIZABLE isolation and replays it on a serialization failure.
 func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
-	// Joining an ambient transaction rules out retrying: the caller owns the
-	// boundary, and replaying only our part of it would be wrong.
+	// Nested calls join the ambient transaction instead of opening a second one.
 	if txExists(ctx) {
 		return unitOfWork(ctx)
 	}
@@ -149,7 +145,7 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 		}
 	}()
 
-	if err := unitOfWork(contextWithTx(ctx, tx)); err != nil {
+	if err = unitOfWork(contextWithTx(ctx, tx)); err != nil {
 		t.rollback(ctx, tx)
 		// Return the cause, not the rollback outcome — that would hide why we
 		// are rolling back in the first place.
@@ -163,12 +159,12 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 	return nil
 }
 
-// rollback aborts tx, logging any failure. The error is not returned: the caller
-// already has the one that caused the rollback.
+// rollback aborts tx, logging any failure.
+// The error is not returned: the caller already has the one that caused the rollback.
+//
+// You should be aware that we are detaching cancellation from ctx because rollback still has to reach the server
+// otherwise, on parent cancellation the transaction could stay open until the connection is reaped.
 func (t *TxManager) rollback(ctx context.Context, tx pgx.Tx) {
-	// Detached from ctx: it may already be cancelled, and the ROLLBACK still has
-	// to reach the server — otherwise the transaction stays open until the
-	// connection is reaped.
 	if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
 		t.logger.ErrorContext(ctx, "rolling back transaction", "error", err)
 	}
@@ -191,13 +187,12 @@ func isRetryable(err error) bool {
 	if !ok {
 		return false
 	}
-	// 40001 is the documented SERIALIZABLE contract; 40P01 is a deadlock, which
-	// is equally safe to replay since nothing was committed.
+	// 40001 is the documented SERIALIZABLE contract; 40P01 is a deadlock, which is equally safe to replay since
+	// nothing was committed.
 	return pgErr.Code == pgerrcode.SerializationFailure || pgErr.Code == pgerrcode.DeadlockDetected
 }
 
-// backoff waits before the next attempt, with jitter so concurrent losers do not
-// collide again in lockstep.
+// backoff waits before the next attempt, with jitter so concurrent losers do not collide again in lockstep.
 func backoff(ctx context.Context, attempt int) error {
 	base := serializableBaseBackoff * time.Duration(1<<(attempt-1))
 	wait := base + rand.N(base)

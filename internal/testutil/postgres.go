@@ -1,7 +1,6 @@
-// Package testutil starts the PostgreSQL container the integration tests run
-// against. These tests are about what the database actually does under
-// concurrency — locks, snapshots, serialization failures — so none of it can be
-// faked with a mock.
+// Package testutil starts the PostgreSQL container the integration tests run against.
+// These tests are about what the database actually does under concurrency,
+// locks, snapshots, serialization failures, so none of them can be faked with a mock.
 package testutil
 
 import (
@@ -34,8 +33,8 @@ type Postgres struct {
 	Pool   *pgxpool.Pool
 }
 
-// shared is the single container for the test binary. Go runs each package as
-// its own process, so one per package is also one per process.
+// shared is the single container for the test binary. Go runs each package as its own process, so one per package is
+// also one per process.
 var shared *Postgres
 
 // RunWithPostgres starts the container, runs the tests, then tears it down.
@@ -63,14 +62,13 @@ func RunWithPostgres(m *testing.M) int {
 
 	code := m.Run()
 
-	if err := terminate(); err != nil {
+	if err = terminate(); err != nil {
 		fmt.Fprintf(os.Stderr, "terminating postgres container: %v\n", err)
 	}
 	return code
 }
 
-// Shared returns the container started by RunWithPostgres, skipping the test in
-// short mode.
+// Shared returns the container started by RunWithPostgres, skipping the test in short mode.
 func Shared(t *testing.T) *Postgres {
 	t.Helper()
 
@@ -115,8 +113,8 @@ func start(ctx context.Context) (*Postgres, func() error, error) {
 		Password: password,
 		SSLMode:  "disable",
 		MinConns: 2,
-		// Small on purpose: the concurrency tests should contend on rows, not
-		// wait for a connection, but a tiny pool also surfaces leaks fast.
+		// Small on purpose: the concurrency tests should contend on rows, not wait for a connection,
+		// but a tiny pool also surfaces leaks fast.
 		MaxConns: 10,
 	}
 
@@ -124,7 +122,7 @@ func start(ctx context.Context) (*Postgres, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := migrate.Up(cfg, migrations); err != nil {
+	if err = migrate.Up(cfg, migrations); err != nil {
 		return nil, nil, fmt.Errorf("applying migrations: %w", err)
 	}
 
@@ -141,7 +139,7 @@ func start(ctx context.Context) (*Postgres, func() error, error) {
 	if err != nil {
 		return nil, nil, err
 	}
-	if err := pool.Ping(ctx); err != nil {
+	if err = pool.Ping(ctx); err != nil {
 		return nil, nil, err
 	}
 
