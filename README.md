@@ -18,6 +18,60 @@ make test-integration   # testcontainers, les démonstrations
 make demo               # uniquement la mesure du verrou
 ```
 
+### Quick start (depuis zéro)
+
+Enregistrez ce script et exécutez-le pour démarrer la démo complète :
+
+```bash
+#!/bin/bash
+set -e
+
+echo "🚀 Démarrage de la démo..."
+
+# Démarrer PostgreSQL
+echo "📦 Démarrage PostgreSQL..."
+make db-up > /dev/null 2>&1
+sleep 2
+
+# Démarrer le prestataire externe (en arrière-plan)
+echo "🔌 Démarrage du prestataire externe (port 9090)..."
+make run-remote > /dev/null 2>&1 &
+REMOTE_PID=$!
+sleep 1
+
+# Démarrer l'API (en arrière-plan)
+echo "🌐 Démarrage de l'API (port 8080)..."
+make run-server > /dev/null 2>&1 &
+SERVER_PID=$!
+sleep 2
+
+# Vérifier que tout fonctionne
+echo "✅ Vérification du serveur..."
+if curl -sS http://localhost:8080/healthz > /dev/null; then
+  echo "✅ Serveur prêt!"
+  echo ""
+  echo "📝 Créer une entreprise :"
+  echo '  curl -X POST localhost:8080/api/companies -H "Content-Type: application/json" -d "{\"name\":\"Test SAS\"}"'
+  echo ""
+  echo "🧪 Exécuter les tests :"
+  echo "  make test-unit          # tests rapides"
+  echo "  make test-integration   # démonstrations complètes"
+  echo "  make demo               # mesure du verrou"
+  echo ""
+  echo "Pour arrêter : make db-down"
+else
+  echo "❌ Le serveur n'a pas pu démarrer"
+  kill $REMOTE_PID $SERVER_PID 2>/dev/null || true
+  make db-down
+  exit 1
+fi
+
+# Garder les processus en avant-plan
+wait
+```
+
+Sauvegardez en `demo.sh`, rendez exécutable (`chmod +x demo.sh`), puis lancez avec `./demo.sh`.
+
 ## Ce que chaque thèse donne en code
 
 | Thèse de l'article | Où c'est écrit | Ce qui le prouve |
