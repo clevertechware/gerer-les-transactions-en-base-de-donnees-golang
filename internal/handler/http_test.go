@@ -1,11 +1,13 @@
 package handler
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
@@ -21,7 +23,7 @@ import (
 // endpoints — get a stubbed success response; every other route is exercised
 // with a malformed id or body, which every handler rejects before ever
 // touching its service.
-func newTestServer(t *testing.T, db Pinger) *HTTPServer {
+func newTestServer(t *testing.T, cfg config.Server, db Pinger) *HTTPServer {
 	t.Helper()
 
 	companies := mocks.NewCompanyService(t)
@@ -39,7 +41,7 @@ func newTestServer(t *testing.T, db Pinger) *HTTPServer {
 		Report:       NewHTTPReportHandler(mocks.NewReportService(t), logger.NewNoOpLogger()),
 	}
 
-	return NewHTTPServer(config.Server{Mode: "test"}, logger.NewNoOpLogger(), db, handlers)
+	return NewHTTPServer(cfg, logger.NewNoOpLogger(), db, handlers)
 }
 
 func TestNewHTTPServer_RegistersEveryRoute(t *testing.T) {
@@ -78,7 +80,7 @@ func TestNewHTTPServer_RegistersEveryRoute(t *testing.T) {
 		{name: "onboarding - malformed body", method: http.MethodPost, path: "/api/onboarding", body: `{`, wantStatus: http.StatusBadRequest},
 	}
 
-	server := newTestServer(t, mocks.NewPinger(t))
+	server := newTestServer(t, config.Server{Mode: "test"}, mocks.NewPinger(t))
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -115,7 +117,7 @@ func TestHTTPServer_Health(t *testing.T) {
 			db := mocks.NewPinger(t)
 			db.EXPECT().Ping(mock.Anything).Return(tt.pingErr).Once()
 
-			server := newTestServer(t, db)
+			server := newTestServer(t, config.Server{Mode: "test"}, db)
 
 			req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 			recorder := httptest.NewRecorder()
@@ -123,5 +125,30 @@ func TestHTTPServer_Health(t *testing.T) {
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
+	}
+}
+
+// TestHTTPServer_Run_ShutsDownOnContextCancellation proves Run actually
+// serves — Addr ":0" binds an OS-assigned loopback-all port — and drains
+// cleanly instead of erroring when its context is cancelled.
+func TestHTTPServer_Run_ShutsDownOnContextCancellation(t *testing.T) {
+	t.Parallel()
+
+	cfg := config.Server{Mode: "test", ShutdownTimeout: time.Second}
+	server := newTestServer(t, cfg, mocks.NewPinger(t))
+
+	ctx, cancel := context.WithCancel(t.Context())
+
+	errCh := make(chan error, 1)
+	go func() { errCh <- server.Run(ctx) }()
+
+	time.Sleep(20 * time.Millisecond) // let ListenAndServe start listening
+	cancel()
+
+	select {
+	case err := <-errCh:
+		assert.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("Run did not shut down after context cancellation")
 	}
 }
