@@ -178,41 +178,79 @@ func (s *RepositorySuite) TestCompany_Delete() {
 	}
 }
 
-// TestCompany_MarkVerified_IsIdempotent is the corrected verification write from
+// TestCompany_MarkVerified_Conditional tests the corrected verification write from
 // the article: conditional, so a replay changes nothing and a concurrent
-// execution is detected without any explicit lock.
-func (s *RepositorySuite) TestCompany_MarkVerified_IsIdempotent() {
-	t := s.T()
-	ctx := s.txContext(t)
+// execution is detected without any explicit lock. The caller can distinguish
+// "gone" from "already verified", which is needed for 404 versus 409 HTTP responses.
+func (s *RepositorySuite) TestCompany_MarkVerified_Conditional() {
+	tests := []struct {
+		name                string
+		setup               func(t *testing.T, ctx context.Context) uuid.UUID
+		markVerRef          string
+		wantErr             error
+		verifyRef           *string
+		testIdempotency     bool
+		wantIdempotencyErr  error
+	}{
+		{
+			name: "first mark succeeds and sets reference",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				company := &domain.Company{Name: "Verifiable", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return company.ID
+			},
+			markVerRef: "VRF-first",
+			verifyRef:  stringPtr("VRF-first"),
+		},
+		{
+			name: "second mark detects conflict via conditional update",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				company := &domain.Company{Name: "Verifiable", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				_, err := s.companies.MarkVerified(ctx, company.ID, "VRF-first")
+				require.NoError(t, err)
+				return company.ID
+			},
+			markVerRef:         "VRF-second",
+			wantErr:            domain.ErrVerificationConflict,
+			testIdempotency:    true,
+			wantIdempotencyErr: domain.ErrVerificationConflict,
+		},
+		{
+			name: "mark missing company returns not found",
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			markVerRef: "VRF-test",
+			wantErr:    domain.ErrCompanyNotFound,
+		},
+	}
 
-	company := &domain.Company{Name: "Verifiable", SeatLimit: 1}
-	require.NoError(t, s.companies.Create(ctx, company))
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			id := tt.setup(t, ctx)
 
-	verified, err := s.companies.MarkVerified(ctx, company.ID, "VRF-first")
-	require.NoError(t, err)
-	assert.Equal(t, domain.VerificationVerified, verified.VerificationStatus)
-	require.NotNil(t, verified.VerificationRef)
-	assert.Equal(t, "VRF-first", *verified.VerificationRef)
-	assert.NotNil(t, verified.VerifiedAt)
+			verified, err := s.companies.MarkVerified(ctx, id, tt.markVerRef)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				if tt.testIdempotency {
+					_, err := s.companies.MarkVerified(ctx, id, "VRF-different")
+					assert.ErrorIs(t, err, tt.wantIdempotencyErr)
+					got, err := s.companies.GetByID(ctx, id)
+					require.NoError(t, err)
+					assert.Equal(t, "VRF-first", *got.VerificationRef)
+				}
+				return
+			}
 
-	// Second call: the WHERE clause no longer matches.
-	_, err = s.companies.MarkVerified(ctx, company.ID, "VRF-second")
-	assert.ErrorIs(t, err, domain.ErrVerificationConflict)
-
-	// And the first reference is intact — no silent overwrite.
-	got, err := s.companies.GetByID(ctx, company.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "VRF-first", *got.VerificationRef)
-}
-
-// TestCompany_MarkVerified_MissingCompany checks the caller can still tell "gone"
-// from "already verified", which decides 404 versus 409.
-func (s *RepositorySuite) TestCompany_MarkVerified_MissingCompany() {
-	t := s.T()
-	ctx := s.txContext(t)
-
-	_, err := s.companies.MarkVerified(ctx, uuidNotInDatabase, "VRF-x")
-	assert.ErrorIs(t, err, domain.ErrCompanyNotFound)
+			require.NoError(t, err)
+			assert.Equal(t, domain.VerificationVerified, verified.VerificationStatus)
+			require.NotNil(t, verified.VerificationRef)
+			assert.Equal(t, tt.verifyRef, verified.VerificationRef)
+			assert.NotNil(t, verified.VerifiedAt)
+		})
+	}
 }
 
 // TestCompany_SetVerified_Unconditional tests the unconditional write of the broken path:
