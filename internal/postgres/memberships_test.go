@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -66,15 +67,46 @@ func (s *RepositorySuite) TestMembership_Lifecycle() {
 	assert.ErrorIs(t, s.memberships.Remove(ctx, companyID, userID), domain.ErrMembershipNotFound)
 }
 
-// TestMembership_DuplicateIsRejected relies on the composite primary key rather
-// than on a prior SELECT, which would be a read-then-write race.
-func (s *RepositorySuite) TestMembership_DuplicateIsRejected() {
-	t := s.T()
-	ctx, companyID, userID := s.seedCompanyAndUser(t)
+// TestMembership_Add tests membership creation using the composite primary key
+// rather than relying on a prior SELECT, which would be a read-then-write race.
+func (s *RepositorySuite) TestMembership_Add() {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T) (context.Context, *domain.Membership)
+		wantErr error
+	}{
+		{
+			name: "successfully adds new membership",
+			setup: func(t *testing.T) (context.Context, *domain.Membership) {
+				ctx, companyID, userID := s.seedCompanyAndUser(t)
+				return ctx, &domain.Membership{UserID: userID, CompanyID: companyID, Role: domain.RoleOwner}
+			},
+		},
+		{
+			name: "rejects duplicate membership",
+			setup: func(t *testing.T) (context.Context, *domain.Membership) {
+				ctx, companyID, userID := s.seedCompanyAndUser(t)
+				m := &domain.Membership{UserID: userID, CompanyID: companyID, Role: domain.RoleOwner}
+				require.NoError(t, s.memberships.Add(ctx, m))
+				return ctx, m
+			},
+			wantErr: domain.ErrMembershipExists,
+		},
+	}
 
-	valid := domain.Membership{UserID: userID, CompanyID: companyID, Role: domain.RoleOwner}
-	require.NoError(t, s.memberships.Add(ctx, &valid))
-	assert.ErrorIs(t, s.memberships.Add(ctx, &valid), domain.ErrMembershipExists)
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx, membership := tt.setup(t)
+
+			err := s.memberships.Add(ctx, membership)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
 }
 
 func (s *RepositorySuite) TestMembership_ListByCompany() {
@@ -91,14 +123,41 @@ func (s *RepositorySuite) TestMembership_ListByCompany() {
 	assert.Equal(t, domain.RoleOwner, got[0].Role)
 }
 
-func (s *RepositorySuite) TestMembership_CountByCompany_Empty() {
-	t := s.T()
-	ctx := s.txContext(t)
+func (s *RepositorySuite) TestMembership_CountByCompany() {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T) (context.Context, uuid.UUID)
+		wantCount int
+	}{
+		{
+			name: "counts zero members for empty company",
+			setup: func(t *testing.T) (context.Context, uuid.UUID) {
+				ctx := s.txContext(t)
+				company := &domain.Company{Name: "Emptyhanded", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return ctx, company.ID
+			},
+			wantCount: 0,
+		},
+		{
+			name: "counts existing members",
+			setup: func(t *testing.T) (context.Context, uuid.UUID) {
+				ctx, companyID, userID := s.seedCompanyAndUser(t)
+				m := &domain.Membership{UserID: userID, CompanyID: companyID, Role: domain.RoleOwner}
+				require.NoError(t, s.memberships.Add(ctx, m))
+				return ctx, companyID
+			},
+			wantCount: 1,
+		},
+	}
 
-	company := &domain.Company{Name: "Emptyhanded", SeatLimit: 1}
-	require.NoError(t, s.companies.Create(ctx, company))
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx, companyID := tt.setup(t)
 
-	count, err := s.memberships.CountByCompany(ctx, company.ID)
-	require.NoError(t, err)
-	assert.Zero(t, count)
+			count, err := s.memberships.CountByCompany(ctx, companyID)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantCount, count)
+		})
+	}
 }
