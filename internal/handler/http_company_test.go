@@ -16,49 +16,66 @@ import (
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 )
 
-// TestCompanyHandler_IgnoresClientSuppliedVerificationState is why the handler
-// binds a request struct instead of the domain entity: otherwise a caller could
-// declare itself verified without ever talking to the provider.
-func TestCompanyHandler_IgnoresClientSuppliedVerificationState(t *testing.T) {
+func TestCompanyHandler_Create(t *testing.T) {
 	t.Parallel()
 
-	service := mocks.NewCompanyService(t)
+	tests := []struct {
+		name       string
+		body       string
+		callsSvc   bool
+		assertions func(t *testing.T, received *domain.Company)
+		wantStatus int
+	}{
+		{
+			name: "ignores client-supplied verification state",
+			body: `{
+				"name": "Sneaky SAS",
+				"verification_status": "verified",
+				"verification_ref": "VRF-forged",
+				"id": "11111111-1111-4111-8111-111111111111"
+			}`,
+			callsSvc: true,
+			assertions: func(t *testing.T, received *domain.Company) {
+				assert.Equal(t, "Sneaky SAS", received.Name)
+				assert.Equal(t, uuid.Nil, received.ID, "the client must not choose the identifier")
+				assert.Empty(t, received.VerificationStatus, "the client must not declare itself verified")
+				assert.Nil(t, received.VerificationRef)
+			},
+			wantStatus: http.StatusCreated,
+		},
+		{
+			name:       "rejects malformed body",
+			body:       `{`,
+			callsSvc:   false,
+			wantStatus: http.StatusBadRequest,
+		},
+	}
 
-	var received domain.Company
-	service.EXPECT().CreateCompany(mock.Anything, mock.Anything).
-		RunAndReturn(func(_ context.Context, c *domain.Company) error {
-			received = *c
-			return nil
-		}).Once()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
 
-	h := NewHTTPCompanyHandler(service, logger.NewNoOpLogger())
-	c, recorder := newTestContext(t, http.MethodPost, "/api/companies", `{
-		"name": "Sneaky SAS",
-		"verification_status": "verified",
-		"verification_ref": "VRF-forged",
-		"id": "11111111-1111-4111-8111-111111111111"
-	}`, nil)
+			service := mocks.NewCompanyService(t)
+			var received domain.Company
+			if tt.callsSvc {
+				service.EXPECT().CreateCompany(mock.Anything, mock.Anything).
+					RunAndReturn(func(_ context.Context, c *domain.Company) error {
+						received = *c
+						return nil
+					}).Once()
+			}
 
-	h.Create(c)
+			h := NewHTTPCompanyHandler(service, logger.NewNoOpLogger())
+			c, recorder := newTestContext(t, http.MethodPost, "/api/companies", tt.body, nil)
 
-	require.Equal(t, http.StatusCreated, recorder.Code)
-	assert.Equal(t, "Sneaky SAS", received.Name)
-	assert.Equal(t, uuid.Nil, received.ID, "the client must not choose the identifier")
-	assert.Empty(t, received.VerificationStatus, "the client must not declare itself verified")
-	assert.Nil(t, received.VerificationRef)
-}
+			h.Create(c)
 
-func TestCompanyHandler_Create_RejectsAMalformedBody(t *testing.T) {
-	t.Parallel()
-
-	service := mocks.NewCompanyService(t) // must not be called
-
-	h := NewHTTPCompanyHandler(service, logger.NewNoOpLogger())
-	c, recorder := newTestContext(t, http.MethodPost, "/api/companies", `{`, nil)
-
-	h.Create(c)
-
-	assert.Equal(t, http.StatusBadRequest, recorder.Code)
+			require.Equal(t, tt.wantStatus, recorder.Code)
+			if tt.assertions != nil {
+				tt.assertions(t, &received)
+			}
+		})
+	}
 }
 
 func TestCompanyHandler_Get(t *testing.T) {
