@@ -23,31 +23,53 @@ func TestOnboardingHandler_Execute(t *testing.T) {
 	tests := []struct {
 		name       string
 		body       string
-		callsSvc   bool
-		serviceErr error
+		svc        func(t *testing.T) *mocks.OnboardingService
 		wantStatus int
 	}{
-		{name: "success", body: validBody, callsSvc: true, wantStatus: http.StatusCreated},
 		{
-			name: "owner email already exists", body: validBody, callsSvc: true,
-			serviceErr: domain.ErrEmailAlreadyExists, wantStatus: http.StatusConflict,
+			name: "success", body: validBody,
+			svc: func(t *testing.T) *mocks.OnboardingService {
+				s := mocks.NewOnboardingService(t)
+				s.EXPECT().Execute(mock.Anything, mock.Anything).
+					Return(&domain.Onboarding{}, nil).Once()
+				return s
+			},
+			wantStatus: http.StatusCreated,
 		},
 		{
-			name: "seat limit invalid", body: validBody, callsSvc: true,
-			serviceErr: domain.ErrInvalidInput, wantStatus: http.StatusBadRequest,
+			name: "owner email already exists", body: validBody,
+			svc: func(t *testing.T) *mocks.OnboardingService {
+				s := mocks.NewOnboardingService(t)
+				s.EXPECT().Execute(mock.Anything, mock.Anything).
+					Return(&domain.Onboarding{}, domain.ErrEmailAlreadyExists).Once()
+				return s
+			},
+			wantStatus: http.StatusConflict,
 		},
-		{name: "malformed body", body: `{`, wantStatus: http.StatusBadRequest},
+		{
+			name: "seat limit invalid", body: validBody,
+			svc: func(t *testing.T) *mocks.OnboardingService {
+				s := mocks.NewOnboardingService(t)
+				s.EXPECT().Execute(mock.Anything, mock.Anything).
+					Return(&domain.Onboarding{}, domain.ErrInvalidInput).Once()
+				return s
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "malformed body", body: `{`,
+			svc: func(t *testing.T) *mocks.OnboardingService {
+				return mocks.NewOnboardingService(t)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewOnboardingService(t)
-			if tt.callsSvc {
-				service.EXPECT().Execute(mock.Anything, mock.Anything).
-					Return(&domain.Onboarding{}, tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPOnboardingHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/api/onboarding", tt.body, nil)

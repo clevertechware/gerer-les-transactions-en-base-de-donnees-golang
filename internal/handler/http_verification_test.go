@@ -25,22 +25,26 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 	tests := []struct {
 		name        string
 		call        func(*HTTPVerificationHandler, *gin.Context)
-		expectSetup func(*mocks.VerificationService)
+		svc         func(t *testing.T) *mocks.VerificationService
 		wantVariant string
 	}{
 		{
 			name: "verify-bad",
 			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.Bad(c) },
-			expectSetup: func(s *mocks.VerificationService) {
+			svc: func(t *testing.T) *mocks.VerificationService {
+				s := mocks.NewVerificationService(t)
 				s.EXPECT().VerifyBad(mock.Anything, companyID).Return(company, nil).Once()
+				return s
 			},
 			wantVariant: "bad",
 		},
 		{
 			name: "verify-good",
 			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.Good(c) },
-			expectSetup: func(s *mocks.VerificationService) {
+			svc: func(t *testing.T) *mocks.VerificationService {
+				s := mocks.NewVerificationService(t)
 				s.EXPECT().VerifyGood(mock.Anything, companyID).Return(company, nil).Once()
+				return s
 			},
 			wantVariant: "good",
 		},
@@ -50,8 +54,7 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewVerificationService(t)
-			tt.expectSetup(service)
+			service := tt.svc(t)
 
 			h := NewHTTPVerificationHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost,
@@ -77,20 +80,43 @@ func TestVerificationHandler_MapsErrors(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		serviceErr error
+		svc        func(t *testing.T) *mocks.VerificationService
 		wantStatus int
 	}{
-		{"already verified", domain.ErrVerificationConflict, http.StatusConflict},
-		{"unknown company", domain.ErrCompanyNotFound, http.StatusNotFound},
-		{"provider unreachable", domain.ErrVerificationUnavailable, http.StatusBadGateway},
+		{
+			name: "already verified",
+			svc: func(t *testing.T) *mocks.VerificationService {
+				s := mocks.NewVerificationService(t)
+				s.EXPECT().VerifyGood(mock.Anything, companyID).Return(nil, domain.ErrVerificationConflict).Once()
+				return s
+			},
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name: "unknown company",
+			svc: func(t *testing.T) *mocks.VerificationService {
+				s := mocks.NewVerificationService(t)
+				s.EXPECT().VerifyGood(mock.Anything, companyID).Return(nil, domain.ErrCompanyNotFound).Once()
+				return s
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "provider unreachable",
+			svc: func(t *testing.T) *mocks.VerificationService {
+				s := mocks.NewVerificationService(t)
+				s.EXPECT().VerifyGood(mock.Anything, companyID).Return(nil, domain.ErrVerificationUnavailable).Once()
+				return s
+			},
+			wantStatus: http.StatusBadGateway,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewVerificationService(t)
-			service.EXPECT().VerifyGood(mock.Anything, companyID).Return(nil, tt.serviceErr).Once()
+			service := tt.svc(t)
 
 			h := NewHTTPVerificationHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/verify-good", "",

@@ -25,32 +25,69 @@ func TestMembershipHandler_Add(t *testing.T) {
 		companyID  string
 		userID     string
 		body       string
-		callsSvc   bool
-		wantRole   string
-		serviceErr error
+		svc        func(t *testing.T) *mocks.MembershipService
 		wantStatus int
 	}{
 		{
 			name: "default role when body is empty", companyID: companyID.String(), userID: userID.String(),
-			callsSvc: true, wantRole: "", wantStatus: http.StatusCreated,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				s := mocks.NewMembershipService(t)
+				s.EXPECT().AddMember(mock.Anything, companyID, userID, "").Return(membership, nil).Once()
+				return s
+			},
+			wantStatus: http.StatusCreated,
 		},
 		{
 			name: "explicit role", companyID: companyID.String(), userID: userID.String(),
-			body: `{"role": "owner"}`, callsSvc: true, wantRole: "owner", wantStatus: http.StatusCreated,
+			body: `{"role": "owner"}`,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				s := mocks.NewMembershipService(t)
+				s.EXPECT().AddMember(mock.Anything, companyID, userID, "owner").Return(membership, nil).Once()
+				return s
+			},
+			wantStatus: http.StatusCreated,
 		},
 		{
 			name: "seat limit reached", companyID: companyID.String(), userID: userID.String(),
-			callsSvc: true, serviceErr: domain.ErrSeatLimitReached, wantStatus: http.StatusUnprocessableEntity,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				s := mocks.NewMembershipService(t)
+				s.EXPECT().AddMember(mock.Anything, companyID, userID, "").
+					Return(membership, domain.ErrSeatLimitReached).Once()
+				return s
+			},
+			wantStatus: http.StatusUnprocessableEntity,
 		},
 		{
 			name: "already a member", companyID: companyID.String(), userID: userID.String(),
-			callsSvc: true, serviceErr: domain.ErrMembershipExists, wantStatus: http.StatusConflict,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				s := mocks.NewMembershipService(t)
+				s.EXPECT().AddMember(mock.Anything, companyID, userID, "").
+					Return(membership, domain.ErrMembershipExists).Once()
+				return s
+			},
+			wantStatus: http.StatusConflict,
 		},
-		{name: "malformed company id", companyID: "not-a-uuid", userID: userID.String(), wantStatus: http.StatusBadRequest},
-		{name: "malformed user id", companyID: companyID.String(), userID: "not-a-uuid", wantStatus: http.StatusBadRequest},
+		{
+			name: "malformed company id", companyID: "not-a-uuid", userID: userID.String(),
+			svc: func(t *testing.T) *mocks.MembershipService {
+				return mocks.NewMembershipService(t)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "malformed user id", companyID: companyID.String(), userID: "not-a-uuid",
+			svc: func(t *testing.T) *mocks.MembershipService {
+				return mocks.NewMembershipService(t)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
 		{
 			name: "malformed body", companyID: companyID.String(), userID: userID.String(),
-			body: `{`, wantStatus: http.StatusBadRequest,
+			body:       `{`,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				return mocks.NewMembershipService(t)
+			},
+			wantStatus: http.StatusBadRequest,
 		},
 	}
 
@@ -58,11 +95,7 @@ func TestMembershipHandler_Add(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewMembershipService(t)
-			if tt.callsSvc {
-				service.EXPECT().AddMember(mock.Anything, companyID, userID, tt.wantRole).
-					Return(membership, tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPMembershipHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPut,
@@ -85,30 +118,49 @@ func TestMembershipHandler_Remove(t *testing.T) {
 		name       string
 		companyID  string
 		userID     string
-		callsSvc   bool
-		serviceErr error
+		svc        func(t *testing.T) *mocks.MembershipService
 		wantStatus int
 	}{
 		{
 			name: "success", companyID: companyID.String(), userID: userID.String(),
-			callsSvc: true, wantStatus: http.StatusNoContent,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				s := mocks.NewMembershipService(t)
+				s.EXPECT().RemoveMember(mock.Anything, companyID, userID).Return(nil).Once()
+				return s
+			},
+			wantStatus: http.StatusNoContent,
 		},
 		{
 			name: "not found", companyID: companyID.String(), userID: userID.String(),
-			callsSvc: true, serviceErr: domain.ErrMembershipNotFound, wantStatus: http.StatusNotFound,
+			svc: func(t *testing.T) *mocks.MembershipService {
+				s := mocks.NewMembershipService(t)
+				s.EXPECT().RemoveMember(mock.Anything, companyID, userID).
+					Return(domain.ErrMembershipNotFound).Once()
+				return s
+			},
+			wantStatus: http.StatusNotFound,
 		},
-		{name: "malformed company id", companyID: "not-a-uuid", userID: userID.String(), wantStatus: http.StatusBadRequest},
-		{name: "malformed user id", companyID: companyID.String(), userID: "not-a-uuid", wantStatus: http.StatusBadRequest},
+		{
+			name: "malformed company id", companyID: "not-a-uuid", userID: userID.String(),
+			svc: func(t *testing.T) *mocks.MembershipService {
+				return mocks.NewMembershipService(t)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "malformed user id", companyID: companyID.String(), userID: "not-a-uuid",
+			svc: func(t *testing.T) *mocks.MembershipService {
+				return mocks.NewMembershipService(t)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewMembershipService(t)
-			if tt.callsSvc {
-				service.EXPECT().RemoveMember(mock.Anything, companyID, userID).Return(tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPMembershipHandler(service, logger.NewNoOpLogger())
 			c, _ := newTestContext(t, http.MethodDelete,

@@ -24,22 +24,44 @@ func TestReportHandler_Get(t *testing.T) {
 	tests := []struct {
 		name       string
 		id         string
-		serviceErr error
+		svc        func(t *testing.T) *mocks.ReportService
 		wantStatus int
 	}{
-		{name: "found", id: companyID.String(), wantStatus: http.StatusOK},
-		{name: "not found", id: companyID.String(), serviceErr: domain.ErrCompanyNotFound, wantStatus: http.StatusNotFound},
-		{name: "malformed id", id: "not-a-uuid", wantStatus: http.StatusBadRequest},
+		{
+			name: "found",
+			id:   companyID.String(),
+			svc: func(t *testing.T) *mocks.ReportService {
+				s := mocks.NewReportService(t)
+				s.EXPECT().CompanyReport(mock.Anything, companyID).Return(report, nil).Once()
+				return s
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "not found",
+			id:   companyID.String(),
+			svc: func(t *testing.T) *mocks.ReportService {
+				s := mocks.NewReportService(t)
+				s.EXPECT().CompanyReport(mock.Anything, companyID).Return(report, domain.ErrCompanyNotFound).Once()
+				return s
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "malformed id",
+			id:   "not-a-uuid",
+			svc: func(t *testing.T) *mocks.ReportService {
+				return mocks.NewReportService(t)
+			},
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			svc := mocks.NewReportService(t)
-			if tt.id != "not-a-uuid" {
-				svc.EXPECT().CompanyReport(mock.Anything, companyID).Return(report, tt.serviceErr).Once()
-			}
+			svc := tt.svc(t)
 
 			h := NewHTTPReportHandler(svc, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodGet, "/api/companies/"+tt.id+"/report", "",

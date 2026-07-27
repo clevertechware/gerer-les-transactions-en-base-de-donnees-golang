@@ -22,26 +22,40 @@ func TestUserHandler_Create(t *testing.T) {
 	tests := []struct {
 		name       string
 		body       string
-		callsSvc   bool
-		serviceErr error
+		svc        func(t *testing.T) *mocks.UserService
 		wantStatus int
 	}{
-		{name: "success", body: validBody, callsSvc: true, wantStatus: http.StatusCreated},
 		{
-			name: "duplicate email", body: validBody, callsSvc: true,
-			serviceErr: domain.ErrEmailAlreadyExists, wantStatus: http.StatusConflict,
+			name: "success", body: validBody,
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().CreateUser(mock.Anything, mock.Anything).Return(nil).Once()
+				return service
+			},
+			wantStatus: http.StatusCreated,
 		},
-		{name: "malformed body", body: `{`, wantStatus: http.StatusBadRequest},
+		{
+			name: "duplicate email", body: validBody,
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().CreateUser(mock.Anything, mock.Anything).
+					Return(domain.ErrEmailAlreadyExists).Once()
+				return service
+			},
+			wantStatus: http.StatusConflict,
+		},
+		{
+			name: "malformed body", body: `{`,
+			svc:        func(t *testing.T) *mocks.UserService { return mocks.NewUserService(t) },
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewUserService(t)
-			if tt.callsSvc {
-				service.EXPECT().CreateUser(mock.Anything, mock.Anything).Return(tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/api/users", tt.body, nil)
@@ -62,22 +76,39 @@ func TestUserHandler_Get(t *testing.T) {
 	tests := []struct {
 		name       string
 		id         string
-		serviceErr error
+		svc        func(t *testing.T) *mocks.UserService
 		wantStatus int
 	}{
-		{name: "found", id: userID.String(), wantStatus: http.StatusOK},
-		{name: "not found", id: userID.String(), serviceErr: domain.ErrUserNotFound, wantStatus: http.StatusNotFound},
-		{name: "malformed id", id: "not-a-uuid", wantStatus: http.StatusBadRequest},
+		{
+			name: "found", id: userID.String(),
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().GetUser(mock.Anything, userID).Return(user, nil).Once()
+				return service
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "not found", id: userID.String(),
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().GetUser(mock.Anything, userID).Return(user, domain.ErrUserNotFound).Once()
+				return service
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "malformed id", id: "not-a-uuid",
+			svc:        func(t *testing.T) *mocks.UserService { return mocks.NewUserService(t) },
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewUserService(t)
-			if tt.id != "not-a-uuid" {
-				service.EXPECT().GetUser(mock.Anything, userID).Return(user, tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodGet, "/api/users/"+tt.id, "",
@@ -95,19 +126,35 @@ func TestUserHandler_List(t *testing.T) {
 
 	tests := []struct {
 		name       string
-		serviceErr error
+		svc        func(t *testing.T) *mocks.UserService
 		wantStatus int
 	}{
-		{name: "success", wantStatus: http.StatusOK},
-		{name: "repository failure", serviceErr: assert.AnError, wantStatus: http.StatusInternalServerError},
+		{
+			name: "success",
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().ListUsers(mock.Anything).Return([]domain.User{{Username: "ada"}}, nil).Once()
+				return service
+			},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name: "repository failure",
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().ListUsers(mock.Anything).
+					Return([]domain.User{{Username: "ada"}}, assert.AnError).Once()
+				return service
+			},
+			wantStatus: http.StatusInternalServerError,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewUserService(t)
-			service.EXPECT().ListUsers(mock.Anything).Return([]domain.User{{Username: "ada"}}, tt.serviceErr).Once()
+			service := tt.svc(t)
 
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodGet, "/api/users", "", nil)
@@ -129,27 +176,44 @@ func TestUserHandler_Update(t *testing.T) {
 		name       string
 		id         string
 		body       string
-		callsSvc   bool
-		serviceErr error
+		svc        func(t *testing.T) *mocks.UserService
 		wantStatus int
 	}{
-		{name: "success", id: userID.String(), body: validBody, callsSvc: true, wantStatus: http.StatusOK},
 		{
-			name: "not found", id: userID.String(), body: validBody, callsSvc: true,
-			serviceErr: domain.ErrUserNotFound, wantStatus: http.StatusNotFound,
+			name: "success", id: userID.String(), body: validBody,
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().UpdateUser(mock.Anything, mock.Anything).Return(nil).Once()
+				return service
+			},
+			wantStatus: http.StatusOK,
 		},
-		{name: "malformed id", id: "not-a-uuid", body: validBody, wantStatus: http.StatusBadRequest},
-		{name: "malformed body", id: userID.String(), body: `{`, wantStatus: http.StatusBadRequest},
+		{
+			name: "not found", id: userID.String(), body: validBody,
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().UpdateUser(mock.Anything, mock.Anything).Return(domain.ErrUserNotFound).Once()
+				return service
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "malformed id", id: "not-a-uuid", body: validBody,
+			svc:        func(t *testing.T) *mocks.UserService { return mocks.NewUserService(t) },
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name: "malformed body", id: userID.String(), body: `{`,
+			svc:        func(t *testing.T) *mocks.UserService { return mocks.NewUserService(t) },
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewUserService(t)
-			if tt.callsSvc {
-				service.EXPECT().UpdateUser(mock.Anything, mock.Anything).Return(tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPut, "/api/users/"+tt.id, tt.body,
@@ -170,26 +234,39 @@ func TestUserHandler_Delete(t *testing.T) {
 	tests := []struct {
 		name       string
 		id         string
-		callsSvc   bool
-		serviceErr error
+		svc        func(t *testing.T) *mocks.UserService
 		wantStatus int
 	}{
-		{name: "success", id: userID.String(), callsSvc: true, wantStatus: http.StatusNoContent},
 		{
-			name: "not found", id: userID.String(), callsSvc: true,
-			serviceErr: domain.ErrUserNotFound, wantStatus: http.StatusNotFound,
+			name: "success", id: userID.String(),
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().DeleteUser(mock.Anything, userID).Return(nil).Once()
+				return service
+			},
+			wantStatus: http.StatusNoContent,
 		},
-		{name: "malformed id", id: "not-a-uuid", wantStatus: http.StatusBadRequest},
+		{
+			name: "not found", id: userID.String(),
+			svc: func(t *testing.T) *mocks.UserService {
+				service := mocks.NewUserService(t)
+				service.EXPECT().DeleteUser(mock.Anything, userID).Return(domain.ErrUserNotFound).Once()
+				return service
+			},
+			wantStatus: http.StatusNotFound,
+		},
+		{
+			name: "malformed id", id: "not-a-uuid",
+			svc:        func(t *testing.T) *mocks.UserService { return mocks.NewUserService(t) },
+			wantStatus: http.StatusBadRequest,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Parallel()
 
-			service := mocks.NewUserService(t)
-			if tt.callsSvc {
-				service.EXPECT().DeleteUser(mock.Anything, userID).Return(tt.serviceErr).Once()
-			}
+			service := tt.svc(t)
 
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, _ := newTestContext(t, http.MethodDelete, "/api/users/"+tt.id, "",
