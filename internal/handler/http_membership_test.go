@@ -83,7 +83,7 @@ func TestMembershipHandler_Add(t *testing.T) {
 		},
 		{
 			name: "malformed body", companyID: companyID.String(), userID: userID.String(),
-			body:       `{`,
+			body: `{`,
 			svc: func(t *testing.T) *mocks.MembershipService {
 				return mocks.NewMembershipService(t)
 			},
@@ -102,7 +102,7 @@ func TestMembershipHandler_Add(t *testing.T) {
 				"/api/companies/"+tt.companyID+"/members/"+tt.userID, tt.body,
 				gin.Params{{Key: "id", Value: tt.companyID}, {Key: "userId", Value: tt.userID}})
 
-			h.Add(c)
+			h.add(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -167,7 +167,7 @@ func TestMembershipHandler_Remove(t *testing.T) {
 				"/api/companies/"+tt.companyID+"/members/"+tt.userID, "",
 				gin.Params{{Key: "id", Value: tt.companyID}, {Key: "userId", Value: tt.userID}})
 
-			h.Remove(c)
+			h.remove(c)
 
 			// A 204 carries no body, so gin never flushes the status to the
 			// recorder; c.Writer.Status() reflects it either way.

@@ -35,7 +35,7 @@ func NewHTTPOnboardingHandler(svc onboardingService, log logger.Logger) *HTTPOnb
 	return &HTTPOnboardingHandler{service: svc, logger: log}
 }
 
-func (h *HTTPOnboardingHandler) Execute(c *gin.Context) {
+func (h *HTTPOnboardingHandler) execute(c *gin.Context) {
 	var req onboardingRequest
 	if !bindJSON(c, &req) {
 		return

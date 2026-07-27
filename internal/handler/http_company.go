@@ -37,7 +37,7 @@ func NewHTTPCompanyHandler(service companyService, log logger.Logger) *HTTPCompa
 	return &HTTPCompanyHandler{service: service, logger: log}
 }
 
-func (h *HTTPCompanyHandler) Create(c *gin.Context) {
+func (h *HTTPCompanyHandler) create(c *gin.Context) {
 	var req companyRequest
 	if !bindJSON(c, &req) {
 		return
@@ -52,7 +52,7 @@ func (h *HTTPCompanyHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, company)
 }
 
-func (h *HTTPCompanyHandler) Get(c *gin.Context) {
+func (h *HTTPCompanyHandler) get(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -67,7 +67,7 @@ func (h *HTTPCompanyHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, company)
 }
 
-func (h *HTTPCompanyHandler) List(c *gin.Context) {
+func (h *HTTPCompanyHandler) list(c *gin.Context) {
 	companies, err := h.service.ListCompanies(c.Request.Context())
 	if err != nil {
 		respondError(c, h.logger, err)
@@ -77,7 +77,7 @@ func (h *HTTPCompanyHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, companies)
 }
 
-func (h *HTTPCompanyHandler) Update(c *gin.Context) {
+func (h *HTTPCompanyHandler) update(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -97,7 +97,7 @@ func (h *HTTPCompanyHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, company)
 }
 
-func (h *HTTPCompanyHandler) Delete(c *gin.Context) {
+func (h *HTTPCompanyHandler) delete(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return

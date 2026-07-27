@@ -74,35 +74,35 @@ func (s *HTTPServer) setupRoutes() {
 	// Plain CRUD. One statement each, so no transaction at all.
 	companies := api.Group("/companies")
 	{
-		companies.POST("", s.handlers.Company.Create)
-		companies.GET("", s.handlers.Company.List)
-		companies.GET("/:id", s.handlers.Company.Get)
-		companies.PUT("/:id", s.handlers.Company.Update)
-		companies.DELETE("/:id", s.handlers.Company.Delete)
+		companies.POST("", s.handlers.Company.create)
+		companies.GET("", s.handlers.Company.list)
+		companies.GET("/:id", s.handlers.Company.get)
+		companies.PUT("/:id", s.handlers.Company.update)
+		companies.DELETE("/:id", s.handlers.Company.delete)
 
 		// ✅ READ ONLY transaction: three reads that must agree.
-		companies.GET("/:id/report", s.handlers.Report.Get)
+		companies.GET("/:id/report", s.handlers.Report.get)
 
 		// ✅ SERIALIZABLE with retry: the seat limit is decided from a count.
-		companies.PUT("/:id/members/:userId", s.handlers.Membership.Add)
-		companies.DELETE("/:id/members/:userId", s.handlers.Membership.Remove)
+		companies.PUT("/:id/members/:userId", s.handlers.Membership.add)
+		companies.DELETE("/:id/members/:userId", s.handlers.Membership.remove)
 
 		// ❌ and ✅ — the same operation, written two ways.
-		companies.POST("/:id/verify-bad", s.handlers.Verification.Bad)
-		companies.POST("/:id/verify-good", s.handlers.Verification.Good)
+		companies.POST("/:id/verify-bad", s.handlers.Verification.bad)
+		companies.POST("/:id/verify-good", s.handlers.Verification.good)
 	}
 
 	users := api.Group("/users")
 	{
-		users.POST("", s.handlers.User.Create)
-		users.GET("", s.handlers.User.List)
-		users.GET("/:id", s.handlers.User.Get)
-		users.PUT("/:id", s.handlers.User.Update)
-		users.DELETE("/:id", s.handlers.User.Delete)
+		users.POST("", s.handlers.User.create)
+		users.GET("", s.handlers.User.list)
+		users.GET("/:id", s.handlers.User.get)
+		users.PUT("/:id", s.handlers.User.update)
+		users.DELETE("/:id", s.handlers.User.delete)
 	}
 
 	// ✅ Read-write transaction: one invariant spanning three tables.
-	api.POST("/onboarding", s.handlers.Onboarding.Execute)
+	api.POST("/onboarding", s.handlers.Onboarding.execute)
 }
 
 // Run serves until ctx is cancelled, then drains in-flight requests.

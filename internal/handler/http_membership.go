@@ -34,7 +34,7 @@ func NewHTTPMembershipHandler(svc membershipService, log logger.Logger) *HTTPMem
 	return &HTTPMembershipHandler{service: svc, logger: log}
 }
 
-func (h *HTTPMembershipHandler) Add(c *gin.Context) {
+func (h *HTTPMembershipHandler) add(c *gin.Context) {
 	companyID, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -59,7 +59,7 @@ func (h *HTTPMembershipHandler) Add(c *gin.Context) {
 	c.JSON(http.StatusCreated, membership)
 }
 
-func (h *HTTPMembershipHandler) Remove(c *gin.Context) {
+func (h *HTTPMembershipHandler) remove(c *gin.Context) {
 	companyID, ok := uuidParam(c, "id")
 	if !ok {
 		return

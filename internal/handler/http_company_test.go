@@ -72,7 +72,7 @@ func TestCompanyHandler_Create(t *testing.T) {
 			h := NewHTTPCompanyHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/api/companies", tt.body, nil)
 
-			h.Create(c)
+			h.create(c)
 
 			require.Equal(t, tt.wantStatus, recorder.Code)
 			if tt.assertions != nil {
@@ -131,7 +131,7 @@ func TestCompanyHandler_Get(t *testing.T) {
 			c, recorder := newTestContext(t, http.MethodGet, "/api/companies/"+tt.id, "",
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Get(c)
+			h.get(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -176,7 +176,7 @@ func TestCompanyHandler_List(t *testing.T) {
 			h := NewHTTPCompanyHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodGet, "/api/companies", "", nil)
 
-			h.List(c)
+			h.list(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -239,7 +239,7 @@ func TestCompanyHandler_Update(t *testing.T) {
 			c, recorder := newTestContext(t, http.MethodPut, "/api/companies/"+tt.id, tt.body,
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Update(c)
+			h.update(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -294,7 +294,7 @@ func TestCompanyHandler_Delete(t *testing.T) {
 			c, _ := newTestContext(t, http.MethodDelete, "/api/companies/"+tt.id, "",
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Delete(c)
+			h.delete(c)
 
 			// A 204 carries no body, so gin never flushes the header to the
 			// recorder; c.Writer.Status() reflects it either way.

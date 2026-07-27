@@ -67,7 +67,7 @@ func TestReportHandler_Get(t *testing.T) {
 			c, recorder := newTestContext(t, http.MethodGet, "/api/companies/"+tt.id+"/report", "",
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Get(c)
+			h.get(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})

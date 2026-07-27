@@ -32,13 +32,13 @@ func NewHTTPVerificationHandler(svc verificationService, log logger.Logger) *HTT
 	return &HTTPVerificationHandler{service: svc, logger: log}
 }
 
-// Bad holds a row lock across the provider call. ❌
-func (h *HTTPVerificationHandler) Bad(c *gin.Context) {
+// bad holds a row lock across the provider call. ❌
+func (h *HTTPVerificationHandler) bad(c *gin.Context) {
 	h.verify(c, "bad", h.service.VerifyBad)
 }
 
-// Good calls the provider first, then writes with one conditional statement. ✅
-func (h *HTTPVerificationHandler) Good(c *gin.Context) {
+// good calls the provider first, then writes with one conditional statement. ✅
+func (h *HTTPVerificationHandler) good(c *gin.Context) {
 	h.verify(c, "good", h.service.VerifyGood)
 }
 

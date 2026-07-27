@@ -48,7 +48,7 @@ func NewHTTPUserHandler(service userService, log logger.Logger) *HTTPUserHandler
 	return &HTTPUserHandler{service: service, logger: log}
 }
 
-func (h *HTTPUserHandler) Create(c *gin.Context) {
+func (h *HTTPUserHandler) create(c *gin.Context) {
 	var req userRequest
 	if !bindJSON(c, &req) {
 		return
@@ -63,7 +63,7 @@ func (h *HTTPUserHandler) Create(c *gin.Context) {
 	c.JSON(http.StatusCreated, user)
 }
 
-func (h *HTTPUserHandler) Get(c *gin.Context) {
+func (h *HTTPUserHandler) get(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -78,7 +78,7 @@ func (h *HTTPUserHandler) Get(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
-func (h *HTTPUserHandler) List(c *gin.Context) {
+func (h *HTTPUserHandler) list(c *gin.Context) {
 	users, err := h.service.ListUsers(c.Request.Context())
 	if err != nil {
 		respondError(c, h.logger, err)
@@ -88,7 +88,7 @@ func (h *HTTPUserHandler) List(c *gin.Context) {
 	c.JSON(http.StatusOK, users)
 }
 
-func (h *HTTPUserHandler) Update(c *gin.Context) {
+func (h *HTTPUserHandler) update(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return
@@ -108,7 +108,7 @@ func (h *HTTPUserHandler) Update(c *gin.Context) {
 	c.JSON(http.StatusOK, user)
 }
 
-func (h *HTTPUserHandler) Delete(c *gin.Context) {
+func (h *HTTPUserHandler) delete(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return

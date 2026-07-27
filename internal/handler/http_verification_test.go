@@ -30,7 +30,7 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 	}{
 		{
 			name: "verify-bad",
-			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.Bad(c) },
+			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.bad(c) },
 			svc: func(t *testing.T) *mocks.VerificationService {
 				s := mocks.NewVerificationService(t)
 				s.EXPECT().VerifyBad(mock.Anything, companyID).Return(company, nil).Once()
@@ -40,7 +40,7 @@ func TestVerificationHandler_RoutesToTheRightVariant(t *testing.T) {
 		},
 		{
 			name: "verify-good",
-			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.Good(c) },
+			call: func(h *HTTPVerificationHandler, c *gin.Context) { h.good(c) },
 			svc: func(t *testing.T) *mocks.VerificationService {
 				s := mocks.NewVerificationService(t)
 				s.EXPECT().VerifyGood(mock.Anything, companyID).Return(company, nil).Once()
@@ -122,7 +122,7 @@ func TestVerificationHandler_MapsErrors(t *testing.T) {
 			c, recorder := newTestContext(t, http.MethodPost, "/verify-good", "",
 				gin.Params{{Key: "id", Value: companyID.String()}})
 
-			h.Good(c)
+			h.good(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -139,7 +139,7 @@ func TestVerificationHandler_RejectsAMalformedID(t *testing.T) {
 	c, recorder := newTestContext(t, http.MethodPost, "/verify-good", "",
 		gin.Params{{Key: "id", Value: "not-a-uuid"}})
 
-	h.Good(c)
+	h.good(c)
 
 	assert.Equal(t, http.StatusBadRequest, recorder.Code)
 }

@@ -29,7 +29,7 @@ func NewHTTPReportHandler(svc reportService, log logger.Logger) *HTTPReportHandl
 	return &HTTPReportHandler{service: svc, logger: log}
 }
 
-func (h *HTTPReportHandler) Get(c *gin.Context) {
+func (h *HTTPReportHandler) get(c *gin.Context) {
 	id, ok := uuidParam(c, "id")
 	if !ok {
 		return

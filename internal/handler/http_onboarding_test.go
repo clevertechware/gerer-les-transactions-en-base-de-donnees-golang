@@ -74,7 +74,7 @@ func TestOnboardingHandler_Execute(t *testing.T) {
 			h := NewHTTPOnboardingHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/api/onboarding", tt.body, nil)
 
-			h.Execute(c)
+			h.execute(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})

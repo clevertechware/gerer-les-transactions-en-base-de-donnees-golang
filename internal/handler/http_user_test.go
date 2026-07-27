@@ -60,7 +60,7 @@ func TestUserHandler_Create(t *testing.T) {
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodPost, "/api/users", tt.body, nil)
 
-			h.Create(c)
+			h.create(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -114,7 +114,7 @@ func TestUserHandler_Get(t *testing.T) {
 			c, recorder := newTestContext(t, http.MethodGet, "/api/users/"+tt.id, "",
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Get(c)
+			h.get(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -159,7 +159,7 @@ func TestUserHandler_List(t *testing.T) {
 			h := NewHTTPUserHandler(service, logger.NewNoOpLogger())
 			c, recorder := newTestContext(t, http.MethodGet, "/api/users", "", nil)
 
-			h.List(c)
+			h.list(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -219,7 +219,7 @@ func TestUserHandler_Update(t *testing.T) {
 			c, recorder := newTestContext(t, http.MethodPut, "/api/users/"+tt.id, tt.body,
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Update(c)
+			h.update(c)
 
 			assert.Equal(t, tt.wantStatus, recorder.Code)
 		})
@@ -272,7 +272,7 @@ func TestUserHandler_Delete(t *testing.T) {
 			c, _ := newTestContext(t, http.MethodDelete, "/api/users/"+tt.id, "",
 				gin.Params{{Key: "id", Value: tt.id}})
 
-			h.Delete(c)
+			h.delete(c)
 
 			// A 204 carries no body, so gin never flushes the status to the
 			// recorder; c.Writer.Status() reflects it either way.
