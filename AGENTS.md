@@ -34,6 +34,12 @@ Les interfaces sont déclarées **côté consommateur**, en minuscule :
 `internal/service/ports.go` pour les repositories, chaque fichier de handler pour
 son service. Le domaine n'exporte que des structs et des erreurs sentinelles.
 
+`internal/handler` n'expose que du transport HTTP (gin) — pas de CLI, pas de
+worker. Ça se voit dans le nom : chaque handler est `HTTP*Handler` dans un
+fichier `http_*.go` (`HTTPCompanyHandler` dans `http_company.go`, etc.). Un
+second transport, le jour où il existe, prend le même traitement plutôt que de
+forcer un sous-paquet `internal/handler/http`.
+
 `pkg/transaction` est le seul contrat public : `UnitOfWork` + `Manager`. Il ne
 dépend d'aucun driver, et n'expose délibérément **aucun** moyen d'obtenir la
 `pgx.Tx` sous-jacente. Un service décide *si* un travail est transactionnel,
@@ -77,6 +83,11 @@ make demo               # la mesure du verrou, isolée
 - Intégration : un conteneur par package via `testutil.RunWithPostgres` dans
   `TestMain`. Isolation par transaction rollbackée (`RepositorySuite.txContext`)
   pour les repositories, `testutil.Truncate` pour les tests concurrents.
+- `internal/postgres` : les méthodes de `RepositorySuite` sont réparties un
+  fichier de test par fichier source (`companies_test.go` pour
+  `companies.go`, etc.), pas un seul fichier pour tout le paquet. Ce qui
+  traverse plusieurs repositories (le test autocommit, `seedCompanyAndUser`)
+  vit sur `suite_test.go`.
 
 **Piège récurrent** : dans PostgreSQL, une instruction en échec avorte toute la
 transaction. Un sous-test qui provoque une violation de contrainte ne peut donc
@@ -105,7 +116,13 @@ invariant que le code applicatif n'a plus à défendre.
 - Erreurs : sentinelles dans `internal/domain`, préfixe `Err`. Le repository
   traduit le SQLSTATE, le service enveloppe une seule fois, le handler mappe vers
   un statut. Un 500 ne renvoie jamais la chaîne d'erreur interne.
-- `make mock` après toute modification d'interface.
+- Handlers HTTP : struct `HTTP*Handler` + constructeur `NewHTTP*Handler`, un
+  fichier `http_*.go` par ressource. Voir Architecture ci-dessus.
+- `make mock` après toute modification d'interface. Le bloc `packages:` de
+  `.mockery.yaml` est keyé sur le chemin du module (`go.mod`) : s'ils divergent,
+  mockery ne matche plus rien et `make mock` ne régénère silencieusement aucun
+  mock interne — `make mock-clean && make mock` puis `git status` doit montrer
+  les mocks réécrits.
 
 ## Branche `feat/replication-routing`
 
