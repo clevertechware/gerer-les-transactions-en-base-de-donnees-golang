@@ -35,12 +35,53 @@ func (s *RepositorySuite) TestCompany_CreateAndGet() {
 	assert.Equal(t, 4, got.SeatLimit)
 }
 
-func (s *RepositorySuite) TestCompany_GetByID_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
+func (s *RepositorySuite) TestCompany_GetByID() {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, ctx context.Context) uuid.UUID
+		wantErr error
+		wantCheck func(t *testing.T, got *domain.Company)
+	}{
+		{
+			name: "retrieves existing company",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				address := "Toulouse"
+				company := &domain.Company{Name: "Clevertechware", Address: &address, SeatLimit: 4}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return company.ID
+			},
+			wantCheck: func(t *testing.T, got *domain.Company) {
+				assert.Equal(t, "Clevertechware", got.Name)
+				assert.Equal(t, "Toulouse", *got.Address)
+				assert.Equal(t, 4, got.SeatLimit)
+			},
+		},
+		{
+			name: "returns error for missing company",
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+	}
 
-	_, err := s.companies.GetByID(ctx, uuidNotInDatabase)
-	assert.ErrorIs(t, err, domain.ErrCompanyNotFound)
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			id := tt.setup(t, ctx)
+
+			got, err := s.companies.GetByID(ctx, id)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			if tt.wantCheck != nil {
+				tt.wantCheck(t, got)
+			}
+		})
+	}
 }
 
 func (s *RepositorySuite) TestCompany_List() {
