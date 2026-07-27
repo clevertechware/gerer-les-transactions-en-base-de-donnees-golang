@@ -1,6 +1,9 @@
 package postgres
 
 import (
+	"context"
+	"testing"
+
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -65,46 +68,114 @@ func (s *RepositorySuite) TestCompany_List() {
 }
 
 func (s *RepositorySuite) TestCompany_Update() {
-	t := s.T()
-	ctx := s.txContext(t)
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, ctx context.Context) *domain.Company
+		update    func(c *domain.Company)
+		wantErr   error
+		wantCheck func(t *testing.T, got *domain.Company)
+	}{
+		{
+			name: "successfully updates existing company",
+			setup: func(t *testing.T, ctx context.Context) *domain.Company {
+				company := &domain.Company{Name: "Before", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return company
+			},
+			update: func(c *domain.Company) {
+				address := "Bordeaux"
+				c.Name = "After"
+				c.Address = &address
+				c.SeatLimit = 9
+			},
+			wantCheck: func(t *testing.T, got *domain.Company) {
+				assert.Equal(t, "After", got.Name)
+				assert.Equal(t, "Bordeaux", *got.Address)
+				assert.Equal(t, 9, got.SeatLimit)
+			},
+		},
+		{
+			name: "returns error for missing company",
+			setup: func(_ *testing.T, _ context.Context) *domain.Company {
+				return &domain.Company{ID: uuidNotInDatabase, Name: "Ghost", SeatLimit: 1}
+			},
+			update:  func(_ *domain.Company) {},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+	}
 
-	company := &domain.Company{Name: "Before", SeatLimit: 1}
-	require.NoError(t, s.companies.Create(ctx, company))
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			company := tt.setup(t, ctx)
+			tt.update(company)
 
-	address := "Bordeaux"
-	company.Name = "After"
-	company.Address = &address
-	company.SeatLimit = 9
-	require.NoError(t, s.companies.Update(ctx, company))
+			err := s.companies.Update(ctx, company)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
 
-	got, err := s.companies.GetByID(ctx, company.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "After", got.Name)
-	assert.Equal(t, &address, got.Address)
-	assert.Equal(t, 9, got.SeatLimit)
+			require.NoError(t, err)
+			got, err := s.companies.GetByID(ctx, company.ID)
+			require.NoError(t, err)
+			tt.wantCheck(t, got)
+		})
+	}
 }
 
-func (s *RepositorySuite) TestCompany_Update_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
+func (s *RepositorySuite) TestCompany_Delete() {
+	tests := []struct {
+		name       string
+		setup      func(t *testing.T, ctx context.Context) uuid.UUID
+		wantErr    error
+		wantHidden bool
+	}{
+		{
+			name: "soft-delete hides the row",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				company := &domain.Company{Name: "To be deleted", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return company.ID
+			},
+			wantHidden: true,
+		},
+		{
+			name: "second delete returns not found",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				company := &domain.Company{Name: "To be deleted", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				require.NoError(t, s.companies.Delete(ctx, company.ID))
+				return company.ID
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+		{
+			name: "deleting missing company returns error",
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+	}
 
-	missing := &domain.Company{ID: uuidNotInDatabase, Name: "Ghost", SeatLimit: 1}
-	assert.ErrorIs(t, s.companies.Update(ctx, missing), domain.ErrCompanyNotFound)
-}
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			id := tt.setup(t, ctx)
 
-func (s *RepositorySuite) TestCompany_Delete_IsSoftAndHidesTheRow() {
-	t := s.T()
-	ctx := s.txContext(t)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, s.companies.Delete(ctx, id), tt.wantErr)
+				return
+			}
 
-	company := &domain.Company{Name: "To be deleted", SeatLimit: 1}
-	require.NoError(t, s.companies.Create(ctx, company))
-	require.NoError(t, s.companies.Delete(ctx, company.ID))
-
-	_, err := s.companies.GetByID(ctx, company.ID)
-	assert.ErrorIs(t, err, domain.ErrCompanyNotFound, "a soft-deleted company should read as absent")
-
-	// Deleting twice is not an error the caller can act on differently.
-	assert.ErrorIs(t, s.companies.Delete(ctx, company.ID), domain.ErrCompanyNotFound)
+			require.NoError(t, s.companies.Delete(ctx, id))
+			if tt.wantHidden {
+				_, err := s.companies.GetByID(ctx, id)
+				assert.ErrorIs(t, err, domain.ErrCompanyNotFound, "a soft-deleted company should read as absent")
+			}
+		})
+	}
 }
 
 // TestCompany_MarkVerified_IsIdempotent is the corrected verification write from
@@ -144,58 +215,119 @@ func (s *RepositorySuite) TestCompany_MarkVerified_MissingCompany() {
 	assert.ErrorIs(t, err, domain.ErrCompanyNotFound)
 }
 
-// TestCompany_SetVerified is the unconditional write of the broken path: it only
-// ever runs while a row lock is held, but the statement itself has no opinion on
+// TestCompany_SetVerified_Unconditional tests the unconditional write of the broken path:
+// it only ever runs while a row lock is held, but the statement itself has no opinion on
 // that — it just needs a transaction to run in, same as any other write.
-func (s *RepositorySuite) TestCompany_SetVerified() {
-	t := s.T()
-	ctx := s.txContext(t)
+func (s *RepositorySuite) TestCompany_SetVerified_Unconditional() {
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, ctx context.Context) uuid.UUID
+		wantErr   error
+		wantRef   *string
+		wantState domain.VerificationStatus
+	}{
+		{
+			name: "existing company becomes verified",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				company := &domain.Company{Name: "Verifiable", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return company.ID
+			},
+			wantRef:   stringPtr("VRF-1"),
+			wantState: domain.VerificationVerified,
+		},
+		{
+			name: "missing company returns error",
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+	}
 
-	company := &domain.Company{Name: "Verifiable", SeatLimit: 1}
-	require.NoError(t, s.companies.Create(ctx, company))
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			id := tt.setup(t, ctx)
 
-	require.NoError(t, s.companies.SetVerified(ctx, company.ID, "VRF-1"))
+			err := s.companies.SetVerified(ctx, id, "VRF-1")
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
 
-	got, err := s.companies.GetByID(ctx, company.ID)
-	require.NoError(t, err)
-	assert.Equal(t, domain.VerificationVerified, got.VerificationStatus)
-	require.NotNil(t, got.VerificationRef)
-	assert.Equal(t, "VRF-1", *got.VerificationRef)
+			require.NoError(t, err)
+			got, err := s.companies.GetByID(ctx, id)
+			require.NoError(t, err)
+			assert.Equal(t, tt.wantState, got.VerificationStatus)
+			assert.Equal(t, tt.wantRef, got.VerificationRef)
+		})
+	}
 }
 
-func (s *RepositorySuite) TestCompany_SetVerified_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
+// TestCompany_LockForUpdate_WithTransactionControl tests row-level locking scenarios.
+// The FOR UPDATE query is meaningless in autocommit mode, requiring a transaction.
+func (s *RepositorySuite) TestCompany_LockForUpdate_WithTransactionControl() {
+	tests := []struct {
+		name              string
+		useTransaction    bool
+		setup             func(t *testing.T, ctx context.Context) uuid.UUID
+		wantErr           error
+		wantVerifyLocked  bool
+	}{
+		{
+			name:           "requires transaction",
+			useTransaction: false,
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrTransactionRequired,
+		},
+		{
+			name:           "existing company can be locked",
+			useTransaction: true,
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				company := &domain.Company{Name: "Lockable", SeatLimit: 1}
+				require.NoError(t, s.companies.Create(ctx, company))
+				return company.ID
+			},
+			wantVerifyLocked: true,
+		},
+		{
+			name:           "missing company returns not found",
+			useTransaction: true,
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrCompanyNotFound,
+		},
+	}
 
-	assert.ErrorIs(t, s.companies.SetVerified(ctx, uuidNotInDatabase, "VRF-1"), domain.ErrCompanyNotFound)
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			var ctx context.Context
+			if tt.useTransaction {
+				ctx = s.txContext(t)
+			} else {
+				ctx = t.Context()
+			}
+
+			id := tt.setup(t, ctx)
+
+			locked, err := s.companies.LockForUpdate(ctx, id)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			if tt.wantVerifyLocked {
+				assert.Equal(t, id, locked.ID)
+			}
+		})
+	}
 }
 
-// TestCompany_LockForUpdate_RequiresTransaction guards the one query that is
-// meaningless in autocommit.
-func (s *RepositorySuite) TestCompany_LockForUpdate_RequiresTransaction() {
-	t := s.T()
-
-	// Note: t.Context() deliberately, not s.txContext(t) — no ambient transaction.
-	_, err := s.companies.LockForUpdate(t.Context(), uuidNotInDatabase)
-	assert.ErrorIs(t, err, domain.ErrTransactionRequired)
-}
-
-func (s *RepositorySuite) TestCompany_LockForUpdate() {
-	t := s.T()
-	ctx := s.txContext(t)
-
-	company := &domain.Company{Name: "Lockable", SeatLimit: 1}
-	require.NoError(t, s.companies.Create(ctx, company))
-
-	locked, err := s.companies.LockForUpdate(ctx, company.ID)
-	require.NoError(t, err)
-	assert.Equal(t, company.ID, locked.ID)
-}
-
-func (s *RepositorySuite) TestCompany_LockForUpdate_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
-
-	_, err := s.companies.LockForUpdate(ctx, uuidNotInDatabase)
-	assert.ErrorIs(t, err, domain.ErrCompanyNotFound)
+func stringPtr(s string) *string {
+	return &s
 }
