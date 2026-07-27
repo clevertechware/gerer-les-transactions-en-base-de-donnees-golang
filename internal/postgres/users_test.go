@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"context"
 	"testing"
 
 	"github.com/google/uuid"
@@ -11,23 +12,49 @@ import (
 )
 
 func (s *RepositorySuite) TestUser_GetByID() {
-	t := s.T()
-	ctx := s.txContext(t)
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, ctx context.Context) uuid.UUID
+		wantErr error
+		wantCheck func(t *testing.T, got *domain.User)
+	}{
+		{
+			name: "retrieves existing user",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				user := &domain.User{FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com", Username: "ada"}
+				require.NoError(t, s.users.Create(ctx, user))
+				return user.ID
+			},
+			wantCheck: func(t *testing.T, got *domain.User) {
+				assert.Equal(t, "ada", got.Username)
+			},
+		},
+		{
+			name: "returns error for missing user",
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrUserNotFound,
+		},
+	}
 
-	user := &domain.User{FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com", Username: "ada"}
-	require.NoError(t, s.users.Create(ctx, user))
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			id := tt.setup(t, ctx)
 
-	got, err := s.users.GetByID(ctx, user.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "ada", got.Username)
-}
+			got, err := s.users.GetByID(ctx, id)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
 
-func (s *RepositorySuite) TestUser_GetByID_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
-
-	_, err := s.users.GetByID(ctx, uuidNotInDatabase)
-	assert.ErrorIs(t, err, domain.ErrUserNotFound)
+			require.NoError(t, err)
+			if tt.wantCheck != nil {
+				tt.wantCheck(t, got)
+			}
+		})
+	}
 }
 
 func (s *RepositorySuite) TestUser_List() {
@@ -52,31 +79,62 @@ func (s *RepositorySuite) TestUser_List() {
 }
 
 func (s *RepositorySuite) TestUser_Update() {
-	t := s.T()
-	ctx := s.txContext(t)
-
-	user := &domain.User{FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com", Username: "ada"}
-	require.NoError(t, s.users.Create(ctx, user))
-
-	user.FirstName = "Augusta"
-	user.Email = "augusta@example.com"
-	require.NoError(t, s.users.Update(ctx, user))
-
-	got, err := s.users.GetByID(ctx, user.ID)
-	require.NoError(t, err)
-	assert.Equal(t, "Augusta", got.FirstName)
-	assert.Equal(t, "augusta@example.com", got.Email)
-}
-
-func (s *RepositorySuite) TestUser_Update_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
-
-	missing := &domain.User{
-		ID: uuidNotInDatabase, FirstName: "Ghost", LastName: "User",
-		Email: "ghost@example.com", Username: "ghost",
+	tests := []struct {
+		name      string
+		setup     func(t *testing.T, ctx context.Context) *domain.User
+		update    func(u *domain.User)
+		wantErr   error
+		wantCheck func(t *testing.T, got *domain.User)
+	}{
+		{
+			name: "successfully updates existing user",
+			setup: func(t *testing.T, ctx context.Context) *domain.User {
+				user := &domain.User{FirstName: "Ada", LastName: "Lovelace", Email: "ada@example.com", Username: "ada"}
+				require.NoError(t, s.users.Create(ctx, user))
+				return user
+			},
+			update: func(u *domain.User) {
+				u.FirstName = "Augusta"
+				u.Email = "augusta@example.com"
+			},
+			wantCheck: func(t *testing.T, got *domain.User) {
+				assert.Equal(t, "Augusta", got.FirstName)
+				assert.Equal(t, "augusta@example.com", got.Email)
+			},
+		},
+		{
+			name: "returns error for missing user",
+			setup: func(_ *testing.T, _ context.Context) *domain.User {
+				return &domain.User{
+					ID: uuidNotInDatabase, FirstName: "Ghost", LastName: "User",
+					Email: "ghost@example.com", Username: "ghost",
+				}
+			},
+			update:  func(_ *domain.User) {},
+			wantErr: domain.ErrUserNotFound,
+		},
 	}
-	assert.ErrorIs(t, s.users.Update(ctx, missing), domain.ErrUserNotFound)
+
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			user := tt.setup(t, ctx)
+			tt.update(user)
+
+			err := s.users.Update(ctx, user)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+			got, err := s.users.GetByID(ctx, user.ID)
+			require.NoError(t, err)
+			if tt.wantCheck != nil {
+				tt.wantCheck(t, got)
+			}
+		})
+	}
 }
 
 func (s *RepositorySuite) TestUser_UniqueConstraintsAreTranslated() {
@@ -130,9 +188,41 @@ func (s *RepositorySuite) TestUser_SoftDeleteFreesTheEmail() {
 	assert.NoError(t, s.users.Create(ctx, reuse), "a soft-deleted user should release its email and username")
 }
 
-func (s *RepositorySuite) TestUser_Delete_NotFound() {
-	t := s.T()
-	ctx := s.txContext(t)
+func (s *RepositorySuite) TestUser_Delete() {
+	tests := []struct {
+		name    string
+		setup   func(t *testing.T, ctx context.Context) uuid.UUID
+		wantErr error
+	}{
+		{
+			name: "soft-deletes existing user",
+			setup: func(t *testing.T, ctx context.Context) uuid.UUID {
+				user := &domain.User{FirstName: "Grace", LastName: "Hopper", Email: "grace@example.com", Username: "grace"}
+				require.NoError(t, s.users.Create(ctx, user))
+				return user.ID
+			},
+		},
+		{
+			name: "returns error for missing user",
+			setup: func(_ *testing.T, _ context.Context) uuid.UUID {
+				return uuidNotInDatabase
+			},
+			wantErr: domain.ErrUserNotFound,
+		},
+	}
 
-	assert.ErrorIs(t, s.users.Delete(ctx, uuidNotInDatabase), domain.ErrUserNotFound)
+	for _, tt := range tests {
+		s.T().Run(tt.name, func(t *testing.T) {
+			ctx := s.txContext(t)
+			id := tt.setup(t, ctx)
+
+			err := s.users.Delete(ctx, id)
+			if tt.wantErr != nil {
+				assert.ErrorIs(t, err, tt.wantErr)
+				return
+			}
+
+			require.NoError(t, err)
+		})
+	}
 }
