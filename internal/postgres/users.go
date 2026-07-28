@@ -83,7 +83,7 @@ func (r *UserRepository) GetByID(ctx context.Context, id uuid.UUID) (*domain.Use
 
 // List returns every live user.
 func (r *UserRepository) List(ctx context.Context) ([]domain.User, error) {
-	const query = "SELECT " + userColumns + "FROM users WHERE deleted_at IS NULL ORDER BY created_at"
+	const query = "SELECT " + userColumns + " FROM users WHERE deleted_at IS NULL ORDER BY created_at"
 
 	rows, err := r.txManager.Executor(ctx).Query(ctx, query)
 	if err != nil {
