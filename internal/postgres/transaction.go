@@ -20,9 +20,9 @@ import (
 // txKey carries the open transaction through the context.
 type txKey struct{}
 
-// txState is what the context carries: the open transaction and the options it was
-// opened with. Keeping the options alongside is what lets a nested call tell whether
-// joining still honours what it asked for.
+// txState is what the context carries: the open transaction and the options it was opened with.
+//
+// Keeping the options alongside is what lets a nested call tell whether joining still honors what it asked for.
 type txState struct {
 	tx   pgx.Tx
 	opts pgx.TxOptions
@@ -30,15 +30,19 @@ type txState struct {
 
 // canSatisfy reports whether joining this transaction still honors opts.
 //
-// Joining is what lets services compose without opening a second transaction, but it
-// is only safe when the open one is at least as strict as the caller asks for. An
-// ExecuteSerializable nested in an Execute would otherwise run at READ COMMITTED,
-// without a retry, and nothing would say so.
+// Joining is what lets services compose without opening a second transaction, but it is only safe when the open one
+// is at least as strict as the caller asks for. An ExecuteSerializable nested in an Execute would otherwise run at
+// READ COMMITTED, without a retry, and nothing would say so.
 //
-// The isolation level is ranked, because a stronger level still honors a weaker
-// request. The access mode is not: read-only nested in read-write silently loses the
-// net that rejects writes, and read-write nested in read-only would die on SQLSTATE
-// 25006 at the first write. Neither direction composes, so both are refused.
+// The isolation level is ranked because a stronger level still honors a weaker request.
+//
+// The access mode is not:
+//
+// - Read-only nested in read-write silently loses the net that rejects writes,
+//
+// - Read-write nested in read-only would die on SQLSTATE 25006 at the first write.
+//
+// Neither direction composes, so both are refused.
 func (s txState) canSatisfy(opts pgx.TxOptions) error {
 	if isolationRank(opts.IsoLevel) > isolationRank(s.opts.IsoLevel) {
 		return fmt.Errorf("%w: %s requested inside %s",
@@ -54,7 +58,6 @@ func (s txState) canSatisfy(opts pgx.TxOptions) error {
 }
 
 // isolationRank orders isolation levels from the weakest to the strongest.
-// PostgreSQL maps READ UNCOMMITTED onto READ COMMITTED, hence the shared rank.
 func isolationRank(level pgx.TxIsoLevel) int {
 	switch effectiveIsolation(level) {
 	case pgx.Serializable:
@@ -66,8 +69,8 @@ func isolationRank(level pgx.TxIsoLevel) int {
 	}
 }
 
-// effectiveIsolation resolves the empty option to READ COMMITTED, the level a stock
-// PostgreSQL applies when the client does not ask for one.
+// effectiveIsolation resolves the empty option to READ COMMITTED, the level a stock PostgreSQL applies when the client
+// does not ask for one.
 func effectiveIsolation(level pgx.TxIsoLevel) pgx.TxIsoLevel {
 	if level == "" {
 		return pgx.ReadCommitted
@@ -75,8 +78,8 @@ func effectiveIsolation(level pgx.TxIsoLevel) pgx.TxIsoLevel {
 	return level
 }
 
-// effectiveAccessMode resolves the empty option to READ WRITE, the mode a stock
-// PostgreSQL applies when the client does not ask for one.
+// effectiveAccessMode resolves the empty option to READ WRITE, the mode a stock PostgreSQL applies when the client
+// does not ask for one.
 func effectiveAccessMode(mode pgx.TxAccessMode) pgx.TxAccessMode {
 	if mode == "" {
 		return pgx.ReadWrite
@@ -107,8 +110,7 @@ func NewTxManager(log logger.Logger, client Client) *TxManager {
 	return &TxManager{logger: log, client: client}
 }
 
-// Executor returns the transaction carried by ctx if there is one, and the
-// connection pool otherwise.
+// Executor returns the transaction carried by ctx if there is one, and the connection pool otherwise.
 //
 // This is the hinge of the whole demo. A repository written against Executor
 // runs unchanged inside a transaction or in autocommit, so the decision to open
@@ -122,8 +124,7 @@ func (t *TxManager) Executor(ctx context.Context) Executor {
 	return t.client
 }
 
-// RequireTx returns an Executor bound to the ambient transaction, or
-// ErrTransactionRequired.
+// RequireTx returns an Executor bound to the ambient transaction, or ErrTransactionRequired.
 //
 // Only for statements that are meaningless without one: SELECT ... FOR UPDATE
 // takes a row lock that is released at the end of the transaction, so in
@@ -191,14 +192,12 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 	return fmt.Errorf("%w after %d attempts: %w", domain.ErrSerializationFailure, serializableMaxAttempts, err)
 }
 
-// ConflictRetries reports how many times a transaction was replayed after a
-// serialization failure or a deadlock.
+// ConflictRetries reports how many times a transaction was replayed after a serialization failure or a deadlock.
 func (t *TxManager) ConflictRetries() int64 {
 	return t.conflictRetries.Load()
 }
 
-// run opens a transaction with opts, executes unitOfWork against it, and commits
-// or rolls back.
+// run opens a transaction with opts, executes unitOfWork against it, and commits or rolls back.
 func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork transaction.UnitOfWork) error {
 	// Nested calls join the ambient transaction instead of opening a second one.
 	if state, ok := txFromContext(ctx); ok {
@@ -213,10 +212,9 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
 
-	// Scheduled before any work: it makes "the transaction is never left open" a
-	// property of this function rather than of its exit paths, and it covers the
-	// panic as well. After a successful commit it is a no-op — pgx marks the
-	// transaction closed and answers ErrTxClosed without reaching the server.
+	// Scheduled before any work: it makes "the transaction is never left open" a property of this function rather
+	// than of its exit paths, and it covers the panic as well. After a successful commit, it is a no-op as pgx marks
+	// the transaction closed and answers ErrTxClosed without reaching the server.
 	defer t.rollback(ctx, tx)
 
 	if err = unitOfWork(contextWithTx(ctx, tx, opts)); err != nil {
@@ -224,9 +222,8 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 	}
 
 	if err = tx.Commit(ctx); err != nil {
-		// PostgreSQL answered ROLLBACK to our COMMIT: the transaction was already
-		// aborted server-side, so the commit reached the server and wrote nothing.
-		// Worth its own error — the caller must not read it as a lost connection.
+		// PostgreSQL answered ROLLBACK to our COMMIT: the transaction was already aborted server-side, so the commit
+		// reached the server but wrote nothing. Worth its own error, the caller must not read it as a lost connection.
 		if errors.Is(err, pgx.ErrTxCommitRollback) {
 			return fmt.Errorf("%w: %w", domain.ErrTransactionAborted, err)
 		}
