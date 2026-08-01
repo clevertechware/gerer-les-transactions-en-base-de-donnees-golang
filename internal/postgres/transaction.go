@@ -35,15 +35,22 @@ type txState struct {
 // ExecuteSerializable nested in an Execute would otherwise run at READ COMMITTED,
 // without a retry, and nothing would say so.
 //
-// Only the isolation level is checked. A read-only unit of work nested in a
-// read-write one keeps the snapshot it came for and loses only the net that rejects
-// writes, which is not worth refusing a legitimate composition over.
+// The isolation level is ranked, because a stronger level still honors a weaker
+// request. The access mode is not: read-only nested in read-write silently loses the
+// net that rejects writes, and read-write nested in read-only would die on SQLSTATE
+// 25006 at the first write. Neither direction composes, so both are refused.
 func (s txState) canSatisfy(opts pgx.TxOptions) error {
-	if isolationRank(opts.IsoLevel) <= isolationRank(s.opts.IsoLevel) {
-		return nil
+	if isolationRank(opts.IsoLevel) > isolationRank(s.opts.IsoLevel) {
+		return fmt.Errorf("%w: %s requested inside %s",
+			domain.ErrIsolationDowngrade, effectiveIsolation(opts.IsoLevel), effectiveIsolation(s.opts.IsoLevel))
 	}
-	return fmt.Errorf("%w: %s requested inside %s",
-		domain.ErrIsolationDowngrade, effectiveIsolation(opts.IsoLevel), effectiveIsolation(s.opts.IsoLevel))
+
+	if effectiveAccessMode(opts.AccessMode) != effectiveAccessMode(s.opts.AccessMode) {
+		return fmt.Errorf("%w: %s requested inside %s",
+			domain.ErrAccessModeMismatch, effectiveAccessMode(opts.AccessMode), effectiveAccessMode(s.opts.AccessMode))
+	}
+
+	return nil
 }
 
 // isolationRank orders isolation levels from the weakest to the strongest.
@@ -66,6 +73,15 @@ func effectiveIsolation(level pgx.TxIsoLevel) pgx.TxIsoLevel {
 		return pgx.ReadCommitted
 	}
 	return level
+}
+
+// effectiveAccessMode resolves the empty option to READ WRITE, the mode a stock
+// PostgreSQL applies when the client does not ask for one.
+func effectiveAccessMode(mode pgx.TxAccessMode) pgx.TxAccessMode {
+	if mode == "" {
+		return pgx.ReadWrite
+	}
+	return mode
 }
 
 const (

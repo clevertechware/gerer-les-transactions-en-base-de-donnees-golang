@@ -123,9 +123,9 @@ func TestTxManager_Execute_JoinsAmbientTransaction(t *testing.T) {
 // TestTxManager_JoiningAnAmbientTransaction covers what joining is allowed to cost.
 //
 // Joining an open transaction is what lets services compose, but it silently
-// replaces the isolation level the caller asked for with the one already in
-// force. Nothing fails, nothing is logged, and the guarantee is simply gone —
-// so a request for a stronger level than the ambient one has to be refused.
+// replaces the options the caller asked for with the ones already in force.
+// Nothing fails, nothing is logged, and the guarantee is simply gone — so a
+// request the ambient transaction cannot honor has to be refused instead.
 func TestTxManager_JoiningAnAmbientTransaction(t *testing.T) {
 	t.Parallel()
 
@@ -148,19 +148,31 @@ func TestTxManager_JoiningAnAmbientTransaction(t *testing.T) {
 			wantErr: domain.ErrIsolationDowngrade,
 		},
 		{
+			name:    "refuses read-only work inside a read-write transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
+			nested:  (*TxManager).ExecuteReadOnly,
+			wantErr: domain.ErrAccessModeMismatch,
+		},
+		{
+			name:    "refuses read-write work inside a read-only transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+			nested:  (*TxManager).Execute,
+			wantErr: domain.ErrAccessModeMismatch,
+		},
+		{
 			name:    "joins an equally strict transaction",
 			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
 			nested:  (*TxManager).ExecuteSerializable,
 		},
 		{
-			name:    "joins a stricter transaction",
-			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
-			nested:  (*TxManager).ExecuteReadOnly,
-		},
-		{
 			name:    "joins a stricter transaction for read-write work",
 			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
 			nested:  (*TxManager).Execute,
+		},
+		{
+			name:    "joins another read-only transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+			nested:  (*TxManager).ExecuteReadOnly,
 		},
 	}
 
