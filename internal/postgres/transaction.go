@@ -81,9 +81,9 @@ type TxManager struct {
 	logger logger.Logger
 	client Client
 
-	// serializationRetries counts replays caused by a serialization failure.
+	// conflictRetries counts replays caused by a serialization failure or a deadlock.
 	// Exposed so tests can prove a retry actually happened rather than infer it.
-	serializationRetries atomic.Int64
+	conflictRetries atomic.Int64
 }
 
 // NewTxManager creates a TxManager over the given client.
@@ -106,12 +106,16 @@ func (t *TxManager) Executor(ctx context.Context) Executor {
 	return t.client
 }
 
-// RequireTx returns the ambient transaction, or ErrTransactionRequired.
+// RequireTx returns an Executor bound to the ambient transaction, or
+// ErrTransactionRequired.
 //
 // Only for statements that are meaningless without one: SELECT ... FOR UPDATE
 // takes a row lock that is released at the end of the transaction, so in
 // autocommit it is released immediately and protects nothing.
-func (t *TxManager) RequireTx(ctx context.Context) (pgx.Tx, error) {
+//
+// It hands back an Executor rather than the pgx.Tx: a repository needs the
+// guarantee that a transaction is open, never the ability to end it.
+func (t *TxManager) RequireTx(ctx context.Context) (Executor, error) {
 	if state, ok := txFromContext(ctx); ok {
 		return state.tx, nil
 	}
@@ -156,8 +160,8 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 			return err
 		}
 
-		t.serializationRetries.Add(1)
-		t.logger.WarnContext(ctx, "serialization failure, replaying transaction",
+		t.conflictRetries.Add(1)
+		t.logger.WarnContext(ctx, "conflict with a concurrent transaction, replaying",
 			"attempt", attempt, "max_attempts", serializableMaxAttempts, "error", err)
 
 		if attempt == serializableMaxAttempts {
@@ -171,10 +175,10 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 	return fmt.Errorf("%w after %d attempts: %w", domain.ErrSerializationFailure, serializableMaxAttempts, err)
 }
 
-// SerializationRetries reports how many times a transaction was replayed after a
-// serialization failure.
-func (t *TxManager) SerializationRetries() int64 {
-	return t.serializationRetries.Load()
+// ConflictRetries reports how many times a transaction was replayed after a
+// serialization failure or a deadlock.
+func (t *TxManager) ConflictRetries() int64 {
+	return t.conflictRetries.Load()
 }
 
 // run opens a transaction with opts, executes unitOfWork against it, and commits

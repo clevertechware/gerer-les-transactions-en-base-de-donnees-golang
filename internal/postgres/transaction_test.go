@@ -352,7 +352,7 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 
 			tt.assertErr(t, err)
 			assert.Equal(t, tt.wantAttempts, attempts, "number of attempts")
-			assert.Equal(t, tt.wantRetries, manager.SerializationRetries(), "retry counter")
+			assert.Equal(t, tt.wantRetries, manager.ConflictRetries(), "retry counter")
 		})
 	}
 }

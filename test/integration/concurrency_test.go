@@ -68,7 +68,7 @@ func TestSeatLimit_HoldsUnderConcurrency(t *testing.T) {
 	close(start)
 	wg.Wait()
 
-	t.Logf("serialization retries: %d", s.txManager.SerializationRetries())
+	t.Logf("conflict retries: %d", s.txManager.ConflictRetries())
 
 	require.Empty(t, other, "no caller should fail for an unexpected reason")
 	assert.Equal(t, 1, succeeded, "exactly one caller should take the seat")
@@ -142,9 +142,9 @@ func TestExecuteSerializable_ReplaysARealSerializationFailure(t *testing.T) {
 
 	wg.Wait()
 
-	t.Logf("attempts: %d, serialization retries: %d", attempts, s.txManager.SerializationRetries())
+	t.Logf("attempts: %d, conflict retries: %d", attempts, s.txManager.ConflictRetries())
 
-	assert.Positive(t, s.txManager.SerializationRetries(),
+	assert.Positive(t, s.txManager.ConflictRetries(),
 		"PostgreSQL should have aborted one of the two transactions with 40001")
 	assert.Greater(t, attempts, len(candidates),
 		"an aborted transaction should have been replayed")
