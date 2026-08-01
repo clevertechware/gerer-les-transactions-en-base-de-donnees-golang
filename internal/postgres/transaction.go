@@ -28,12 +28,12 @@ type txState struct {
 	opts pgx.TxOptions
 }
 
-// canSatisfy reports whether joining this transaction still honours opts.
+// canSatisfy reports whether joining this transaction still honors opts.
 //
 // Joining is what lets services compose without opening a second transaction, but it
 // is only safe when the open one is at least as strict as the caller asks for. An
 // ExecuteSerializable nested in an Execute would otherwise run at READ COMMITTED,
-// without retry, and nothing would say so.
+// without a retry, and nothing would say so.
 //
 // Only the isolation level is checked. A read-only unit of work nested in a
 // read-write one keeps the snapshot it came for and loses only the net that rejects
@@ -204,8 +204,6 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 	defer t.rollback(ctx, tx)
 
 	if err = unitOfWork(contextWithTx(ctx, tx, opts)); err != nil {
-		// Return the cause, not the rollback outcome — that would hide why we
-		// are rolling back in the first place.
 		return err
 	}
 
@@ -262,7 +260,7 @@ func isRetryable(err error) bool {
 	return pgErr.Code == pgerrcode.SerializationFailure || pgErr.Code == pgerrcode.DeadlockDetected
 }
 
-// backoff waits before the next attempt, with jitter so concurrent losers do not collide again in lockstep.
+// backoff waits before the next attempt, with jitter, so concurrent losers do not collide again in lockstep.
 func backoff(ctx context.Context, attempt int) error {
 	base := serializableBaseBackoff * time.Duration(1<<(attempt-1))
 	wait := base + rand.N(base)
