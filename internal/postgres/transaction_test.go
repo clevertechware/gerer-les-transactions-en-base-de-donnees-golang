@@ -16,6 +16,7 @@ import (
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/postgres/mocks"
 	pgxmocks "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/mocks/github.com/jackc/pgx/v5"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/pkg/transaction"
 )
 
 var errUnitOfWork = errors.New("unit of work failed")
@@ -30,13 +31,23 @@ func newTestManager(client Client) *TxManager {
 
 func noopUnitOfWork(context.Context) error { return nil }
 
+// expectCommit sets the expectations of a transaction that reaches COMMIT.
+//
+// The deferred rollback still runs after a successful commit: pgx marks the
+// transaction closed and answers ErrTxClosed without sending anything to the
+// server. A mock has no such state, so the test spells the no-op out.
+func expectCommit(tx *pgxmocks.Tx) {
+	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+}
+
 // TestTxManager_Execute_Commits proves the happy path ends in COMMIT, not just
 // "no error".
 func TestTxManager_Execute_Commits(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	expectCommit(tx)
 
 	client := mocks.NewClient(t)
 	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
@@ -99,7 +110,7 @@ func TestTxManager_Execute_JoinsAmbientTransaction(t *testing.T) {
 
 	// No expectation at all: touching the client would fail the test.
 	client := mocks.NewClient(t)
-	ctx := contextWithTx(t.Context(), pgxmocks.NewTx(t))
+	ctx := contextWithTx(t.Context(), pgxmocks.NewTx(t), pgx.TxOptions{})
 
 	var ran bool
 	err := newTestManager(client).Execute(ctx, func(context.Context) error {
@@ -109,6 +120,88 @@ func TestTxManager_Execute_JoinsAmbientTransaction(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, ran)
+}
+
+// TestTxManager_JoiningAnAmbientTransaction covers what joining is allowed to cost.
+//
+// Joining an open transaction is what lets services compose, but it silently
+// replaces the options the caller asked for with the ones already in force.
+// Nothing fails, nothing is logged, and the guarantee is simply gone — so a
+// request the ambient transaction cannot honor has to be refused instead.
+func TestTxManager_JoiningAnAmbientTransaction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ambient pgx.TxOptions
+		nested  func(*TxManager, context.Context, transaction.UnitOfWork) error
+		wantErr error
+	}{
+		{
+			name:    "refuses SERIALIZABLE inside the default isolation level",
+			ambient: pgx.TxOptions{},
+			nested:  (*TxManager).ExecuteSerializable,
+			wantErr: domain.ErrIsolationDowngrade,
+		},
+		{
+			name:    "refuses REPEATABLE READ inside the default isolation level",
+			ambient: pgx.TxOptions{},
+			nested:  (*TxManager).ExecuteReadOnly,
+			wantErr: domain.ErrIsolationDowngrade,
+		},
+		{
+			name:    "refuses read-only work inside a read-write transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
+			nested:  (*TxManager).ExecuteReadOnly,
+			wantErr: domain.ErrAccessModeMismatch,
+		},
+		{
+			name:    "refuses read-write work inside a read-only transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+			nested:  (*TxManager).Execute,
+			wantErr: domain.ErrAccessModeMismatch,
+		},
+		{
+			name:    "joins an equally strict transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
+			nested:  (*TxManager).ExecuteSerializable,
+		},
+		{
+			name:    "joins a stricter transaction for read-write work",
+			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+			nested:  (*TxManager).Execute,
+		},
+		{
+			name:    "joins another read-only transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead, AccessMode: pgx.ReadOnly},
+			nested:  (*TxManager).ExecuteReadOnly,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// No expectation on the client: a nested call must never open a transaction.
+			manager := newTestManager(mocks.NewClient(t))
+			ctx := contextWithTx(t.Context(), pgxmocks.NewTx(t), tt.ambient)
+
+			var ran bool
+			err := tt.nested(manager, ctx, func(context.Context) error {
+				ran = true
+				return nil
+			})
+
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.False(t, ran, "the unit of work must not run under a guarantee it did not ask for")
+				return
+			}
+
+			require.NoError(t, err)
+			assert.True(t, ran)
+		})
+	}
 }
 
 // TestTxManager_Execute_RollsBackOnPanic makes sure a panic cannot leave a
@@ -129,6 +222,50 @@ func TestTxManager_Execute_RollsBackOnPanic(t *testing.T) {
 	}, "the panic must still propagate after the rollback")
 }
 
+// TestTxManager_Execute_ReportsCommitFailure covers the exit path the earlier
+// explicit rollbacks did not: the unit of work succeeded, the COMMIT did not.
+func TestTxManager_Execute_ReportsCommitFailure(t *testing.T) {
+	t.Parallel()
+
+	commitFailed := errors.New("connection reset")
+
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Commit(mock.Anything).Return(commitFailed).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+
+	client := mocks.NewClient(t)
+	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	err := newTestManager(client).Execute(t.Context(), func(context.Context) error {
+		return nil
+	})
+
+	require.ErrorIs(t, err, commitFailed)
+}
+
+// TestTxManager_Execute_ReportsAbortedTransaction distinguishes the commit that
+// failed to reach the server from the commit the server answered with ROLLBACK.
+//
+// The second one is not an infrastructure problem: the transaction was already
+// aborted, the COMMIT was honoured, and nothing was written. Reporting it as a
+// generic commit failure would send the caller looking for a network fault.
+func TestTxManager_Execute_ReportsAbortedTransaction(t *testing.T) {
+	t.Parallel()
+
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Commit(mock.Anything).Return(pgx.ErrTxCommitRollback).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+
+	client := mocks.NewClient(t)
+	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	err := newTestManager(client).Execute(t.Context(), func(context.Context) error {
+		return nil
+	})
+
+	require.ErrorIs(t, err, domain.ErrTransactionAborted)
+}
+
 // TestTxManager_ExecuteReadOnly_UsesReadOnlyOptions pins both options down.
 //
 // AccessMode must stay ReadOnly or the safety net disappears; IsoLevel must stay
@@ -139,7 +276,7 @@ func TestTxManager_ExecuteReadOnly_UsesReadOnlyOptions(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	expectCommit(tx)
 
 	client := mocks.NewClient(t)
 	client.EXPECT().
@@ -209,7 +346,7 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 			for _, outcome := range tt.outcomes {
 				tx := pgxmocks.NewTx(t)
 				if outcome == nil {
-					tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+					expectCommit(tx)
 				} else {
 					tx.EXPECT().Rollback(mock.Anything).Return(nil).Once()
 				}
@@ -229,7 +366,7 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 
 			tt.assertErr(t, err)
 			assert.Equal(t, tt.wantAttempts, attempts, "number of attempts")
-			assert.Equal(t, tt.wantRetries, manager.SerializationRetries(), "retry counter")
+			assert.Equal(t, tt.wantRetries, manager.ConflictRetries(), "retry counter")
 		})
 	}
 }
@@ -249,7 +386,7 @@ func TestTxManager_Executor(t *testing.T) {
 
 	t.Run("returns the ambient transaction", func(t *testing.T) {
 		tx := pgxmocks.NewTx(t)
-		assert.Same(t, tx, manager.Executor(contextWithTx(t.Context(), tx)))
+		assert.Same(t, tx, manager.Executor(contextWithTx(t.Context(), tx, pgx.TxOptions{})))
 	})
 }
 
@@ -265,7 +402,7 @@ func TestTxManager_RequireTx(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrTransactionRequired)
 
 	tx := pgxmocks.NewTx(t)
-	got, err := manager.RequireTx(contextWithTx(t.Context(), tx))
+	got, err := manager.RequireTx(contextWithTx(t.Context(), tx, pgx.TxOptions{}))
 	require.NoError(t, err)
 	assert.Same(t, tx, got)
 }
@@ -308,7 +445,7 @@ func TestTxManager_RoutesOnlyReadOnlyTransactionsToTheReplica(t *testing.T) {
 			t.Parallel()
 
 			tx := pgxmocks.NewTx(t)
-			tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+			expectCommit(tx)
 
 			primary, replica := mocks.NewClient(t), mocks.NewClient(t)
 			chosen := replica
@@ -331,7 +468,7 @@ func TestTxManager_WithoutAReplicaEverythingRunsOnThePrimary(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	expectCommit(tx)
 
 	primary := mocks.NewClient(t)
 	primary.EXPECT().
@@ -341,14 +478,23 @@ func TestTxManager_WithoutAReplicaEverythingRunsOnThePrimary(t *testing.T) {
 	require.NoError(t, newTestManager(primary).ExecuteReadOnly(t.Context(), noopUnitOfWork))
 }
 
-// TestTxManager_ReadOnlyNestedInAWriteStaysOnThePrimary guards the case that
-// would otherwise read a snapshot missing the rows the enclosing transaction
-// just wrote — and has not committed, so no standby could ever see them.
-func TestTxManager_ReadOnlyNestedInAWriteStaysOnThePrimary(t *testing.T) {
+// TestTxManager_ReadOnlyNestedInAWriteIsRefused guards the case that would
+// otherwise read a snapshot missing the rows the enclosing transaction just
+// wrote — and has not committed, so no standby could ever see them.
+//
+// Joining the write transaction would keep the work on the primary, which is
+// safe for routing, but it would silently drop both halves of what
+// ExecuteReadOnly promises: the frozen snapshot and the rejection of writes. So
+// the nesting is refused instead, and the routing hazard goes with it — no
+// second transaction is opened anywhere.
+//
+// The read-only block differs from the enclosing write on both axes; the
+// isolation mismatch is simply the one reported first.
+func TestTxManager_ReadOnlyNestedInAWriteIsRefused(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(nil).Once()
 
 	primary, replica := mocks.NewClient(t), mocks.NewClient(t)
 	primary.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
@@ -359,6 +505,6 @@ func TestTxManager_ReadOnlyNestedInAWriteStaysOnThePrimary(t *testing.T) {
 		return manager.ExecuteReadOnly(ctx, noopUnitOfWork)
 	})
 
-	require.NoError(t, err)
+	require.ErrorIs(t, err, domain.ErrIsolationDowngrade)
 	replica.AssertNotCalled(t, "BeginTx", mock.Anything, mock.Anything)
 }

@@ -20,6 +20,73 @@ import (
 // txKey carries the open transaction through the context.
 type txKey struct{}
 
+// txState is what the context carries: the open transaction and the options it was opened with.
+//
+// Keeping the options alongside is what lets a nested call tell whether joining still honors what it asked for.
+type txState struct {
+	tx   pgx.Tx
+	opts pgx.TxOptions
+}
+
+// canSatisfy reports whether joining this transaction still honors opts.
+//
+// Joining is what lets services compose without opening a second transaction, but it is only safe when the open one
+// is at least as strict as the caller asks for. An ExecuteSerializable nested in an Execute would otherwise run at
+// READ COMMITTED, without a retry, and nothing would say so.
+//
+// The isolation level is ranked because a stronger level still honors a weaker request.
+//
+// The access mode is not:
+//
+// - Read-only nested in read-write silently loses the net that rejects writes,
+//
+// - Read-write nested in read-only would die on SQLSTATE 25006 at the first write.
+//
+// Neither direction composes, so both are refused.
+func (s txState) canSatisfy(opts pgx.TxOptions) error {
+	if isolationRank(opts.IsoLevel) > isolationRank(s.opts.IsoLevel) {
+		return fmt.Errorf("%w: %s requested inside %s",
+			domain.ErrIsolationDowngrade, effectiveIsolation(opts.IsoLevel), effectiveIsolation(s.opts.IsoLevel))
+	}
+
+	if effectiveAccessMode(opts.AccessMode) != effectiveAccessMode(s.opts.AccessMode) {
+		return fmt.Errorf("%w: %s requested inside %s",
+			domain.ErrAccessModeMismatch, effectiveAccessMode(opts.AccessMode), effectiveAccessMode(s.opts.AccessMode))
+	}
+
+	return nil
+}
+
+// isolationRank orders isolation levels from the weakest to the strongest.
+func isolationRank(level pgx.TxIsoLevel) int {
+	switch effectiveIsolation(level) {
+	case pgx.Serializable:
+		return 3
+	case pgx.RepeatableRead:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// effectiveIsolation resolves the empty option to READ COMMITTED, the level a stock PostgreSQL applies when the client
+// does not ask for one.
+func effectiveIsolation(level pgx.TxIsoLevel) pgx.TxIsoLevel {
+	if level == "" {
+		return pgx.ReadCommitted
+	}
+	return level
+}
+
+// effectiveAccessMode resolves the empty option to READ WRITE, the mode a stock PostgreSQL applies when the client
+// does not ask for one.
+func effectiveAccessMode(mode pgx.TxAccessMode) pgx.TxAccessMode {
+	if mode == "" {
+		return pgx.ReadWrite
+	}
+	return mode
+}
+
 const (
 	// serializableMaxAttempts bounds how many times a serialization failure is replayed.
 	// Under SERIALIZABLE, error 40001 is the contract, not a bug.
@@ -36,9 +103,9 @@ type TxManager struct {
 	// single-database setup needs no special case anywhere below.
 	replica Client
 
-	// serializationRetries counts replays caused by a serialization failure.
+	// conflictRetries counts replays caused by a serialization failure or a deadlock.
 	// Exposed so tests can prove a retry actually happened rather than infer it.
-	serializationRetries atomic.Int64
+	conflictRetries atomic.Int64
 }
 
 // Option configures a TxManager.
@@ -64,8 +131,7 @@ func NewTxManager(log logger.Logger, client Client, opts ...Option) *TxManager {
 	return manager
 }
 
-// Executor returns the transaction carried by ctx if there is one, and the
-// connection pool otherwise.
+// Executor returns the transaction carried by ctx if there is one, and the connection pool otherwise.
 //
 // This is the hinge of the whole demo. A repository written against Executor
 // runs unchanged inside a transaction or in autocommit, so the decision to open
@@ -78,20 +144,23 @@ func NewTxManager(log logger.Logger, client Client, opts ...Option) *TxManager {
 // sending reads to a standby by default would break read-your-writes for every
 // caller that just wrote a row.
 func (t *TxManager) Executor(ctx context.Context) Executor {
-	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx
+	if state, ok := txFromContext(ctx); ok {
+		return state.tx
 	}
 	return t.client
 }
 
-// RequireTx returns the ambient transaction, or ErrTransactionRequired.
+// RequireTx returns an Executor bound to the ambient transaction, or ErrTransactionRequired.
 //
 // Only for statements that are meaningless without one: SELECT ... FOR UPDATE
 // takes a row lock that is released at the end of the transaction, so in
 // autocommit it is released immediately and protects nothing.
-func (t *TxManager) RequireTx(ctx context.Context) (pgx.Tx, error) {
-	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx, nil
+//
+// It hands back an Executor rather than the pgx.Tx: a repository needs the
+// guarantee that a transaction is open, never the ability to end it.
+func (t *TxManager) RequireTx(ctx context.Context) (Executor, error) {
+	if state, ok := txFromContext(ctx); ok {
+		return state.tx, nil
 	}
 	return nil, domain.ErrTransactionRequired
 }
@@ -120,12 +189,16 @@ func (t *TxManager) ExecuteReadOnly(ctx context.Context, unitOfWork transaction.
 
 // ExecuteSerializable runs unitOfWork under SERIALIZABLE isolation and replays it on a serialization failure.
 func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
-	// Nested calls join the ambient transaction instead of opening a second one.
-	if txExists(ctx) {
+	opts := pgx.TxOptions{IsoLevel: pgx.Serializable}
+
+	// Nested calls join the ambient transaction instead of opening a second one, and
+	// there is nothing to replay: the transaction that would be retried is not ours.
+	if state, ok := txFromContext(ctx); ok {
+		if err := state.canSatisfy(opts); err != nil {
+			return err
+		}
 		return unitOfWork(ctx)
 	}
-
-	opts := pgx.TxOptions{IsoLevel: pgx.Serializable}
 
 	var err error
 	for attempt := 1; attempt <= serializableMaxAttempts; attempt++ {
@@ -134,8 +207,8 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 			return err
 		}
 
-		t.serializationRetries.Add(1)
-		t.logger.WarnContext(ctx, "serialization failure, replaying transaction",
+		t.conflictRetries.Add(1)
+		t.logger.WarnContext(ctx, "conflict with a concurrent transaction, replaying",
 			"attempt", attempt, "max_attempts", serializableMaxAttempts, "error", err)
 
 		if attempt == serializableMaxAttempts {
@@ -149,20 +222,19 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 	return fmt.Errorf("%w after %d attempts: %w", domain.ErrSerializationFailure, serializableMaxAttempts, err)
 }
 
-// SerializationRetries reports how many times a transaction was replayed after a
-// serialization failure.
-func (t *TxManager) SerializationRetries() int64 {
-	return t.serializationRetries.Load()
+// ConflictRetries reports how many times a transaction was replayed after a serialization failure or a deadlock.
+func (t *TxManager) ConflictRetries() int64 {
+	return t.conflictRetries.Load()
 }
 
-// run opens a transaction on client with opts, executes unitOfWork against it,
-// and commits or rolls back.
+// run opens a transaction on client with opts, executes unitOfWork against it, and commits or rolls back.
 func (t *TxManager) run(ctx context.Context, client Client, opts pgx.TxOptions, unitOfWork transaction.UnitOfWork) error {
-	// Nested calls join the ambient transaction instead of opening a second one.
-	// A read-only block nested inside a read-write one therefore stays on the
-	// primary: it is already reading what that transaction has written, and no
-	// standby has seen those rows yet.
-	if txExists(ctx) {
+	// Nested calls join the ambient transaction instead of opening a second one, so the routing decision belongs to
+	// the outermost boundary: a nested block runs on the connection that one opened, standby or primary.
+	if state, ok := txFromContext(ctx); ok {
+		if err := state.canSatisfy(opts); err != nil {
+			return err
+		}
 		return unitOfWork(ctx)
 	}
 
@@ -171,21 +243,21 @@ func (t *TxManager) run(ctx context.Context, client Client, opts pgx.TxOptions, 
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
 
-	defer func() {
-		if p := recover(); p != nil {
-			t.rollback(ctx, tx)
-			panic(p)
-		}
-	}()
+	// Scheduled before any work: it makes "the transaction is never left open" a property of this function rather
+	// than of its exit paths, and it covers the panic as well. After a successful commit, it is a no-op as pgx marks
+	// the transaction closed and answers ErrTxClosed without reaching the server.
+	defer t.rollback(ctx, tx)
 
-	if err = unitOfWork(contextWithTx(ctx, tx)); err != nil {
-		t.rollback(ctx, tx)
-		// Return the cause, not the rollback outcome — that would hide why we
-		// are rolling back in the first place.
+	if err = unitOfWork(contextWithTx(ctx, tx, opts)); err != nil {
 		return err
 	}
 
 	if err = tx.Commit(ctx); err != nil {
+		// PostgreSQL answered ROLLBACK to our COMMIT: the transaction was already aborted server-side, so the commit
+		// reached the server but wrote nothing. Worth its own error, the caller must not read it as a lost connection.
+		if errors.Is(err, pgx.ErrTxCommitRollback) {
+			return fmt.Errorf("%w: %w", domain.ErrTransactionAborted, err)
+		}
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 
@@ -203,14 +275,21 @@ func (t *TxManager) rollback(ctx context.Context, tx pgx.Tx) {
 	}
 }
 
-// contextWithTx embeds tx in ctx for downstream repositories.
-func contextWithTx(ctx context.Context, tx pgx.Tx) context.Context {
-	return context.WithValue(ctx, txKey{}, tx)
+// contextWithTx embeds tx and the options it was opened with in ctx, for downstream
+// repositories and for nested transaction boundaries.
+func contextWithTx(ctx context.Context, tx pgx.Tx, opts pgx.TxOptions) context.Context {
+	return context.WithValue(ctx, txKey{}, txState{tx: tx, opts: opts})
+}
+
+// txFromContext returns the transaction carried by ctx, if there is one.
+func txFromContext(ctx context.Context) (txState, bool) {
+	state, ok := ctx.Value(txKey{}).(txState)
+	return state, ok
 }
 
 // txExists reports whether ctx already carries an open transaction.
 func txExists(ctx context.Context) bool {
-	_, ok := ctx.Value(txKey{}).(pgx.Tx)
+	_, ok := txFromContext(ctx)
 	return ok
 }
 
@@ -225,7 +304,7 @@ func isRetryable(err error) bool {
 	return pgErr.Code == pgerrcode.SerializationFailure || pgErr.Code == pgerrcode.DeadlockDetected
 }
 
-// backoff waits before the next attempt, with jitter so concurrent losers do not collide again in lockstep.
+// backoff waits before the next attempt, with jitter, so concurrent losers do not collide again in lockstep.
 func backoff(ctx context.Context, attempt int) error {
 	base := serializableBaseBackoff * time.Duration(1<<(attempt-1))
 	wait := base + rand.N(base)

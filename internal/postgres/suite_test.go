@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
@@ -59,7 +60,7 @@ func (s *RepositorySuite) txContext(t *testing.T) context.Context {
 		s.Require().NoError(tx.Rollback(context.WithoutCancel(ctx)), "rolling back")
 	})
 
-	return contextWithTx(ctx, tx)
+	return contextWithTx(ctx, tx, pgx.TxOptions{})
 }
 
 // seedCompanyAndUser inserts one company and one user in a fresh transaction and
