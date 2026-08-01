@@ -36,4 +36,7 @@ var (
 	ErrTransactionRequired = errors.New("operation requires an open transaction")
 	// ErrSerializationFailure indicates the transaction could not be serialized and all retry attempts were exhausted.
 	ErrSerializationFailure = errors.New("could not serialize access")
+	// ErrIsolationDowngrade indicates that the open transaction is weaker than the isolation level being asked for,
+	// so joining it would silently drop the guarantee the caller requested.
+	ErrIsolationDowngrade = errors.New("ambient transaction is weaker than the isolation level requested")
 )

@@ -16,6 +16,7 @@ import (
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/logger"
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/postgres/mocks"
 	pgxmocks "github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/mocks/github.com/jackc/pgx/v5"
+	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/pkg/transaction"
 )
 
 var errUnitOfWork = errors.New("unit of work failed")
@@ -107,7 +108,7 @@ func TestTxManager_Execute_JoinsAmbientTransaction(t *testing.T) {
 
 	// No expectation at all: touching the client would fail the test.
 	client := mocks.NewClient(t)
-	ctx := contextWithTx(t.Context(), pgxmocks.NewTx(t))
+	ctx := contextWithTx(t.Context(), pgxmocks.NewTx(t), pgx.TxOptions{})
 
 	var ran bool
 	err := newTestManager(client).Execute(ctx, func(context.Context) error {
@@ -117,6 +118,76 @@ func TestTxManager_Execute_JoinsAmbientTransaction(t *testing.T) {
 
 	require.NoError(t, err)
 	assert.True(t, ran)
+}
+
+// TestTxManager_JoiningAnAmbientTransaction covers what joining is allowed to cost.
+//
+// Joining an open transaction is what lets services compose, but it silently
+// replaces the isolation level the caller asked for with the one already in
+// force. Nothing fails, nothing is logged, and the guarantee is simply gone —
+// so a request for a stronger level than the ambient one has to be refused.
+func TestTxManager_JoiningAnAmbientTransaction(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		ambient pgx.TxOptions
+		nested  func(*TxManager, context.Context, transaction.UnitOfWork) error
+		wantErr error
+	}{
+		{
+			name:    "refuses SERIALIZABLE inside the default isolation level",
+			ambient: pgx.TxOptions{},
+			nested:  (*TxManager).ExecuteSerializable,
+			wantErr: domain.ErrIsolationDowngrade,
+		},
+		{
+			name:    "refuses REPEATABLE READ inside the default isolation level",
+			ambient: pgx.TxOptions{},
+			nested:  (*TxManager).ExecuteReadOnly,
+			wantErr: domain.ErrIsolationDowngrade,
+		},
+		{
+			name:    "joins an equally strict transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
+			nested:  (*TxManager).ExecuteSerializable,
+		},
+		{
+			name:    "joins a stricter transaction",
+			ambient: pgx.TxOptions{IsoLevel: pgx.Serializable},
+			nested:  (*TxManager).ExecuteReadOnly,
+		},
+		{
+			name:    "joins a stricter transaction for read-write work",
+			ambient: pgx.TxOptions{IsoLevel: pgx.RepeatableRead},
+			nested:  (*TxManager).Execute,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			// No expectation on the client: a nested call must never open a transaction.
+			manager := newTestManager(mocks.NewClient(t))
+			ctx := contextWithTx(t.Context(), pgxmocks.NewTx(t), tt.ambient)
+
+			var ran bool
+			err := tt.nested(manager, ctx, func(context.Context) error {
+				ran = true
+				return nil
+			})
+
+			if tt.wantErr != nil {
+				require.ErrorIs(t, err, tt.wantErr)
+				assert.False(t, ran, "the unit of work must not run under a guarantee it did not ask for")
+				return
+			}
+
+			require.NoError(t, err)
+			assert.True(t, ran)
+		})
+	}
 }
 
 // TestTxManager_Execute_RollsBackOnPanic makes sure a panic cannot leave a
@@ -278,7 +349,7 @@ func TestTxManager_Executor(t *testing.T) {
 
 	t.Run("returns the ambient transaction", func(t *testing.T) {
 		tx := pgxmocks.NewTx(t)
-		assert.Same(t, tx, manager.Executor(contextWithTx(t.Context(), tx)))
+		assert.Same(t, tx, manager.Executor(contextWithTx(t.Context(), tx, pgx.TxOptions{})))
 	})
 }
 
@@ -294,7 +365,7 @@ func TestTxManager_RequireTx(t *testing.T) {
 	require.ErrorIs(t, err, domain.ErrTransactionRequired)
 
 	tx := pgxmocks.NewTx(t)
-	got, err := manager.RequireTx(contextWithTx(t.Context(), tx))
+	got, err := manager.RequireTx(contextWithTx(t.Context(), tx, pgx.TxOptions{}))
 	require.NoError(t, err)
 	assert.Same(t, tx, got)
 }

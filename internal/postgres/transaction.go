@@ -20,6 +20,54 @@ import (
 // txKey carries the open transaction through the context.
 type txKey struct{}
 
+// txState is what the context carries: the open transaction and the options it was
+// opened with. Keeping the options alongside is what lets a nested call tell whether
+// joining still honours what it asked for.
+type txState struct {
+	tx   pgx.Tx
+	opts pgx.TxOptions
+}
+
+// canSatisfy reports whether joining this transaction still honours opts.
+//
+// Joining is what lets services compose without opening a second transaction, but it
+// is only safe when the open one is at least as strict as the caller asks for. An
+// ExecuteSerializable nested in an Execute would otherwise run at READ COMMITTED,
+// without retry, and nothing would say so.
+//
+// Only the isolation level is checked. A read-only unit of work nested in a
+// read-write one keeps the snapshot it came for and loses only the net that rejects
+// writes, which is not worth refusing a legitimate composition over.
+func (s txState) canSatisfy(opts pgx.TxOptions) error {
+	if isolationRank(opts.IsoLevel) <= isolationRank(s.opts.IsoLevel) {
+		return nil
+	}
+	return fmt.Errorf("%w: %s requested inside %s",
+		domain.ErrIsolationDowngrade, effectiveIsolation(opts.IsoLevel), effectiveIsolation(s.opts.IsoLevel))
+}
+
+// isolationRank orders isolation levels from the weakest to the strongest.
+// PostgreSQL maps READ UNCOMMITTED onto READ COMMITTED, hence the shared rank.
+func isolationRank(level pgx.TxIsoLevel) int {
+	switch effectiveIsolation(level) {
+	case pgx.Serializable:
+		return 3
+	case pgx.RepeatableRead:
+		return 2
+	default:
+		return 1
+	}
+}
+
+// effectiveIsolation resolves the empty option to READ COMMITTED, the level a stock
+// PostgreSQL applies when the client does not ask for one.
+func effectiveIsolation(level pgx.TxIsoLevel) pgx.TxIsoLevel {
+	if level == "" {
+		return pgx.ReadCommitted
+	}
+	return level
+}
+
 const (
 	// serializableMaxAttempts bounds how many times a serialization failure is replayed.
 	// Under SERIALIZABLE, error 40001 is the contract, not a bug.
@@ -52,8 +100,8 @@ func NewTxManager(log logger.Logger, client Client) *TxManager {
 // that justifies it. Without this, every single-statement read and write would
 // be wrapped in a BEGIN it does not need.
 func (t *TxManager) Executor(ctx context.Context) Executor {
-	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx
+	if state, ok := txFromContext(ctx); ok {
+		return state.tx
 	}
 	return t.client
 }
@@ -64,8 +112,8 @@ func (t *TxManager) Executor(ctx context.Context) Executor {
 // takes a row lock that is released at the end of the transaction, so in
 // autocommit it is released immediately and protects nothing.
 func (t *TxManager) RequireTx(ctx context.Context) (pgx.Tx, error) {
-	if tx, ok := ctx.Value(txKey{}).(pgx.Tx); ok {
-		return tx, nil
+	if state, ok := txFromContext(ctx); ok {
+		return state.tx, nil
 	}
 	return nil, domain.ErrTransactionRequired
 }
@@ -90,12 +138,16 @@ func (t *TxManager) ExecuteReadOnly(ctx context.Context, unitOfWork transaction.
 
 // ExecuteSerializable runs unitOfWork under SERIALIZABLE isolation and replays it on a serialization failure.
 func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
-	// Nested calls join the ambient transaction instead of opening a second one.
-	if txExists(ctx) {
+	opts := pgx.TxOptions{IsoLevel: pgx.Serializable}
+
+	// Nested calls join the ambient transaction instead of opening a second one, and
+	// there is nothing to replay: the transaction that would be retried is not ours.
+	if state, ok := txFromContext(ctx); ok {
+		if err := state.canSatisfy(opts); err != nil {
+			return err
+		}
 		return unitOfWork(ctx)
 	}
-
-	opts := pgx.TxOptions{IsoLevel: pgx.Serializable}
 
 	var err error
 	for attempt := 1; attempt <= serializableMaxAttempts; attempt++ {
@@ -129,7 +181,10 @@ func (t *TxManager) SerializationRetries() int64 {
 // or rolls back.
 func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork transaction.UnitOfWork) error {
 	// Nested calls join the ambient transaction instead of opening a second one.
-	if txExists(ctx) {
+	if state, ok := txFromContext(ctx); ok {
+		if err := state.canSatisfy(opts); err != nil {
+			return err
+		}
 		return unitOfWork(ctx)
 	}
 
@@ -144,7 +199,7 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 	// transaction closed and answers ErrTxClosed without reaching the server.
 	defer t.rollback(ctx, tx)
 
-	if err = unitOfWork(contextWithTx(ctx, tx)); err != nil {
+	if err = unitOfWork(contextWithTx(ctx, tx, opts)); err != nil {
 		// Return the cause, not the rollback outcome — that would hide why we
 		// are rolling back in the first place.
 		return err
@@ -168,14 +223,21 @@ func (t *TxManager) rollback(ctx context.Context, tx pgx.Tx) {
 	}
 }
 
-// contextWithTx embeds tx in ctx for downstream repositories.
-func contextWithTx(ctx context.Context, tx pgx.Tx) context.Context {
-	return context.WithValue(ctx, txKey{}, tx)
+// contextWithTx embeds tx and the options it was opened with in ctx, for downstream
+// repositories and for nested transaction boundaries.
+func contextWithTx(ctx context.Context, tx pgx.Tx, opts pgx.TxOptions) context.Context {
+	return context.WithValue(ctx, txKey{}, txState{tx: tx, opts: opts})
+}
+
+// txFromContext returns the transaction carried by ctx, if there is one.
+func txFromContext(ctx context.Context) (txState, bool) {
+	state, ok := ctx.Value(txKey{}).(txState)
+	return state, ok
 }
 
 // txExists reports whether ctx already carries an open transaction.
 func txExists(ctx context.Context) bool {
-	_, ok := ctx.Value(txKey{}).(pgx.Tx)
+	_, ok := txFromContext(ctx)
 	return ok
 }
 
