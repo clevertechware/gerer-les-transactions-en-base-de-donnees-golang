@@ -138,15 +138,13 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 		return fmt.Errorf("beginning transaction: %w", err)
 	}
 
-	defer func() {
-		if p := recover(); p != nil {
-			t.rollback(ctx, tx)
-			panic(p)
-		}
-	}()
+	// Scheduled before any work: it makes "the transaction is never left open" a
+	// property of this function rather than of its exit paths, and it covers the
+	// panic as well. After a successful commit it is a no-op — pgx marks the
+	// transaction closed and answers ErrTxClosed without reaching the server.
+	defer t.rollback(ctx, tx)
 
 	if err = unitOfWork(contextWithTx(ctx, tx)); err != nil {
-		t.rollback(ctx, tx)
 		// Return the cause, not the rollback outcome — that would hide why we
 		// are rolling back in the first place.
 		return err

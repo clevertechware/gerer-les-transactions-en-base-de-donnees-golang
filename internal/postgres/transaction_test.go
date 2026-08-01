@@ -28,13 +28,23 @@ func newTestManager(client Client) *TxManager {
 	return NewTxManager(logger.NewNoOpLogger(), client)
 }
 
+// expectCommit sets the expectations of a transaction that reaches COMMIT.
+//
+// The deferred rollback still runs after a successful commit: pgx marks the
+// transaction closed and answers ErrTxClosed without sending anything to the
+// server. A mock has no such state, so the test spells the no-op out.
+func expectCommit(tx *pgxmocks.Tx) {
+	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+}
+
 // TestTxManager_Execute_Commits proves the happy path ends in COMMIT, not just
 // "no error".
 func TestTxManager_Execute_Commits(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	expectCommit(tx)
 
 	client := mocks.NewClient(t)
 	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
@@ -127,6 +137,27 @@ func TestTxManager_Execute_RollsBackOnPanic(t *testing.T) {
 	}, "the panic must still propagate after the rollback")
 }
 
+// TestTxManager_Execute_ReportsCommitFailure covers the exit path the earlier
+// explicit rollbacks did not: the unit of work succeeded, the COMMIT did not.
+func TestTxManager_Execute_ReportsCommitFailure(t *testing.T) {
+	t.Parallel()
+
+	commitFailed := errors.New("connection reset")
+
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Commit(mock.Anything).Return(commitFailed).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+
+	client := mocks.NewClient(t)
+	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	err := newTestManager(client).Execute(t.Context(), func(context.Context) error {
+		return nil
+	})
+
+	require.ErrorIs(t, err, commitFailed)
+}
+
 // TestTxManager_ExecuteReadOnly_UsesReadOnlyOptions pins both options down.
 //
 // AccessMode must stay ReadOnly or the safety net disappears; IsoLevel must stay
@@ -137,7 +168,7 @@ func TestTxManager_ExecuteReadOnly_UsesReadOnlyOptions(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+	expectCommit(tx)
 
 	client := mocks.NewClient(t)
 	client.EXPECT().
@@ -207,7 +238,7 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 			for _, outcome := range tt.outcomes {
 				tx := pgxmocks.NewTx(t)
 				if outcome == nil {
-					tx.EXPECT().Commit(mock.Anything).Return(nil).Once()
+					expectCommit(tx)
 				} else {
 					tx.EXPECT().Rollback(mock.Anything).Return(nil).Once()
 				}
