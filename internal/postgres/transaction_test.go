@@ -229,6 +229,29 @@ func TestTxManager_Execute_ReportsCommitFailure(t *testing.T) {
 	require.ErrorIs(t, err, commitFailed)
 }
 
+// TestTxManager_Execute_ReportsAbortedTransaction distinguishes the commit that
+// failed to reach the server from the commit the server answered with ROLLBACK.
+//
+// The second one is not an infrastructure problem: the transaction was already
+// aborted, the COMMIT was honoured, and nothing was written. Reporting it as a
+// generic commit failure would send the caller looking for a network fault.
+func TestTxManager_Execute_ReportsAbortedTransaction(t *testing.T) {
+	t.Parallel()
+
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Commit(mock.Anything).Return(pgx.ErrTxCommitRollback).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+
+	client := mocks.NewClient(t)
+	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	err := newTestManager(client).Execute(t.Context(), func(context.Context) error {
+		return nil
+	})
+
+	require.ErrorIs(t, err, domain.ErrTransactionAborted)
+}
+
 // TestTxManager_ExecuteReadOnly_UsesReadOnlyOptions pins both options down.
 //
 // AccessMode must stay ReadOnly or the safety net disappears; IsoLevel must stay

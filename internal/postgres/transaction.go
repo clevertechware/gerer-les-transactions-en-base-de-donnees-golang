@@ -206,6 +206,12 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 	}
 
 	if err = tx.Commit(ctx); err != nil {
+		// PostgreSQL answered ROLLBACK to our COMMIT: the transaction was already
+		// aborted server-side, so the commit reached the server and wrote nothing.
+		// Worth its own error — the caller must not read it as a lost connection.
+		if errors.Is(err, pgx.ErrTxCommitRollback) {
+			return fmt.Errorf("%w: %w", domain.ErrTransactionAborted, err)
+		}
 		return fmt.Errorf("committing transaction: %w", err)
 	}
 

@@ -39,4 +39,7 @@ var (
 	// ErrIsolationDowngrade indicates that the open transaction is weaker than the isolation level being asked for,
 	// so joining it would silently drop the guarantee the caller requested.
 	ErrIsolationDowngrade = errors.New("ambient transaction is weaker than the isolation level requested")
+	// ErrTransactionAborted indicates that the server had already rolled the transaction back when the commit was
+	// issued, so nothing was written.
+	ErrTransactionAborted = errors.New("transaction was already aborted when the commit was issued")
 )
