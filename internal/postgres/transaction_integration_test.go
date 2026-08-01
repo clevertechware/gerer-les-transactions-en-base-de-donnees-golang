@@ -4,6 +4,7 @@ import (
 	"context"
 
 	"github.com/jackc/pgerrcode"
+	"github.com/jackc/pgx/v5"
 	"github.com/stretchr/testify/require"
 
 	"github.com/clevertechware/gerer-les-transactions-en-base-de-donnees-golang/internal/domain"
@@ -124,4 +125,69 @@ func (s *RepositorySuite) TestExecute_RollsBackEveryWrite() {
 	require.NoError(t, err)
 	require.Zero(t, users, "the user insert should have been rolled back")
 
+}
+
+// TestExecute_ReportsATransactionTheServerAborted is the one failure mode that
+// looks like a success from the application's side.
+//
+// A statement that fails inside a transaction does not just fail: it puts the
+// whole transaction in the aborted state, where PostgreSQL refuses everything
+// until the block ends. The COMMIT that follows is still accepted — but it ends
+// the transaction as a rollback and says so in its command tag, which is how
+// pgx produces ErrTxCommitRollback.
+//
+// So a unit of work that swallows an error commits nothing while believing it
+// committed everything. Reporting that as an ordinary commit failure would send
+// the reader looking for a network fault instead of for the swallowed error.
+func (s *RepositorySuite) TestExecute_ReportsATransactionTheServerAborted() {
+	t := s.T()
+	ctx := t.Context()
+
+	name := "aborted-" + t.Name()
+	email := "aborted-" + t.Name() + "@example.com"
+
+	err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		company := &domain.Company{Name: name, SeatLimit: 3}
+		if err := s.companies.Create(txCtx, company); err != nil {
+			return err
+		}
+
+		user := &domain.User{
+			FirstName: "Aborted", LastName: "Test",
+			Email: email, Username: "aborted-" + t.Name(),
+		}
+		if err := s.users.Create(txCtx, user); err != nil {
+			return err
+		}
+
+		duplicate := *user
+		duplicate.Username += "-second"
+		duplicateErr := s.users.Create(txCtx, &duplicate)
+		require.ErrorIs(t, duplicateErr, domain.ErrEmailAlreadyExists)
+
+		// The transaction is dead from here on: PostgreSQL answers 25P02 to every
+		// statement, whatever it is, until the block ends.
+		_, readErr := s.companies.GetByID(txCtx, company.ID)
+		pgErr, ok := pgError(readErr)
+		require.True(t, ok, "expected a PostgreSQL error, got %v", readErr)
+		require.Equal(t, pgerrcode.InFailedSQLTransaction, pgErr.Code,
+			"an aborted transaction should refuse the read with 25P02, got %s", pgErr.Code)
+
+		// The mistake this test exists for: treating the duplicate as "already
+		// there, nothing to do" and returning as if the work had succeeded.
+		return nil
+	})
+
+	require.ErrorIs(t, err, domain.ErrTransactionAborted,
+		"a COMMIT answered with ROLLBACK must not look like an ordinary commit failure")
+	require.ErrorIs(t, err, pgx.ErrTxCommitRollback,
+		"the driver's cause must stay reachable under the domain error")
+
+	var companies, users int
+	require.NoError(t, s.pg.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM companies WHERE name = $1`, name).Scan(&companies))
+	require.Zero(t, companies, "the COMMIT rolled back, so the company cannot exist")
+	require.NoError(t, s.pg.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM users WHERE email = $1`, email).Scan(&users))
+	require.Zero(t, users, "the user inserted before the failure is gone too")
 }
