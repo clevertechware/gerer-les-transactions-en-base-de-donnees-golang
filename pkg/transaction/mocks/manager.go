@@ -69,6 +69,53 @@ func (_c *Manager_Execute_Call) RunAndReturn(run func(context.Context, transacti
 	return _c
 }
 
+// ExecuteNested provides a mock function with given fields: ctx, unitOfWork
+func (_m *Manager) ExecuteNested(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
+	ret := _m.Called(ctx, unitOfWork)
+
+	if len(ret) == 0 {
+		panic("no return value specified for ExecuteNested")
+	}
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, transaction.UnitOfWork) error); ok {
+		r0 = rf(ctx, unitOfWork)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// Manager_ExecuteNested_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExecuteNested'
+type Manager_ExecuteNested_Call struct {
+	*mock.Call
+}
+
+// ExecuteNested is a helper method to define mock.On call
+//   - ctx context.Context
+//   - unitOfWork transaction.UnitOfWork
+func (_e *Manager_Expecter) ExecuteNested(ctx interface{}, unitOfWork interface{}) *Manager_ExecuteNested_Call {
+	return &Manager_ExecuteNested_Call{Call: _e.mock.On("ExecuteNested", ctx, unitOfWork)}
+}
+
+func (_c *Manager_ExecuteNested_Call) Run(run func(ctx context.Context, unitOfWork transaction.UnitOfWork)) *Manager_ExecuteNested_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(transaction.UnitOfWork))
+	})
+	return _c
+}
+
+func (_c *Manager_ExecuteNested_Call) Return(_a0 error) *Manager_ExecuteNested_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *Manager_ExecuteNested_Call) RunAndReturn(run func(context.Context, transaction.UnitOfWork) error) *Manager_ExecuteNested_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ExecuteReadOnly provides a mock function with given fields: ctx, unitOfWork
 func (_m *Manager) ExecuteReadOnly(ctx context.Context, unitOfWork transaction.UnitOfWork) error {
 	ret := _m.Called(ctx, unitOfWork)
