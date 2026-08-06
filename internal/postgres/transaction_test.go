@@ -369,6 +369,101 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 	}
 }
 
+// TestTxManager_ExecuteNested_ReleasesTheSavepoint proves the happy path ends in
+// RELEASE SAVEPOINT and that the work ran against the savepoint, not against the
+// transaction around it — otherwise a failure would take the outer writes with it.
+func TestTxManager_ExecuteNested_ReleasesTheSavepoint(t *testing.T) {
+	t.Parallel()
+
+	savepoint := pgxmocks.NewTx(t)
+	expectCommit(savepoint)
+
+	outer := pgxmocks.NewTx(t)
+	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()
+
+	manager := newTestManager(mocks.NewClient(t))
+	ctx := contextWithTx(t.Context(), outer, pgx.TxOptions{})
+
+	var executor Executor
+	require.NoError(t, manager.ExecuteNested(ctx, func(nestedCtx context.Context) error {
+		executor = manager.Executor(nestedCtx)
+		return nil
+	}))
+
+	assert.Same(t, savepoint, executor, "the unit of work must run inside the savepoint")
+}
+
+// TestTxManager_ExecuteNested_RollsBackToTheSavepointOnly is the whole point of
+// the savepoint: the failure is undone, the transaction around it is not ended.
+//
+// The outer transaction mock carries no expectation beyond opening the savepoint,
+// so committing or rolling it back here would fail the test.
+func TestTxManager_ExecuteNested_RollsBackToTheSavepointOnly(t *testing.T) {
+	t.Parallel()
+
+	savepoint := pgxmocks.NewTx(t)
+	savepoint.EXPECT().Rollback(mock.Anything).Return(nil).Once()
+
+	outer := pgxmocks.NewTx(t)
+	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()
+
+	ctx := contextWithTx(t.Context(), outer, pgx.TxOptions{})
+	err := newTestManager(mocks.NewClient(t)).ExecuteNested(ctx, func(context.Context) error {
+		return errUnitOfWork
+	})
+
+	require.ErrorIs(t, err, errUnitOfWork)
+	savepoint.AssertNotCalled(t, "Commit", mock.Anything)
+}
+
+// TestTxManager_ExecuteNested_MarksAConflictAsUnrecoverable guards the trap this
+// boundary introduces.
+//
+// Every other nested failure may be logged and stepped over. A serialization
+// failure may not: the savepoint does not contain it, the server has doomed the
+// whole transaction, and swallowing it would rob ExecuteSerializable of the very
+// error it replays on. The marker is what lets a caller tell the two apart.
+func TestTxManager_ExecuteNested_MarksAConflictAsUnrecoverable(t *testing.T) {
+	t.Parallel()
+
+	conflict := serializationFailure()
+
+	savepoint := pgxmocks.NewTx(t)
+	savepoint.EXPECT().Rollback(mock.Anything).Return(nil).Once()
+
+	outer := pgxmocks.NewTx(t)
+	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()
+
+	ctx := contextWithTx(t.Context(), outer, pgx.TxOptions{IsoLevel: pgx.Serializable})
+	err := newTestManager(mocks.NewClient(t)).ExecuteNested(ctx, func(context.Context) error {
+		return conflict
+	})
+
+	require.ErrorIs(t, err, domain.ErrConflictAbortsTransaction)
+	require.ErrorIs(t, err, conflict, "the driver's cause must stay reachable, ExecuteSerializable replays on it")
+}
+
+// TestTxManager_ExecuteNested_OpensATransactionOutsideOne keeps the boundary
+// honest when there is nothing to nest in: a savepoint alone guarantees nothing.
+func TestTxManager_ExecuteNested_OpensATransactionOutsideOne(t *testing.T) {
+	t.Parallel()
+
+	tx := pgxmocks.NewTx(t)
+	expectCommit(tx)
+
+	client := mocks.NewClient(t)
+	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	var ranInsideTx bool
+	err := newTestManager(client).ExecuteNested(t.Context(), func(ctx context.Context) error {
+		ranInsideTx = txExists(ctx)
+		return nil
+	})
+
+	require.NoError(t, err)
+	assert.True(t, ranInsideTx)
+}
+
 // TestTxManager_Executor is the behaviour that lets a repository be written once
 // and used both inside and outside a transaction.
 func TestTxManager_Executor(t *testing.T) {

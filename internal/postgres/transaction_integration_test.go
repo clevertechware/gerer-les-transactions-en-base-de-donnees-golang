@@ -127,6 +127,72 @@ func (s *RepositorySuite) TestExecute_RollsBackEveryWrite() {
 
 }
 
+// TestExecuteNested_UndoesOnlyItsOwnWrites is the claim that separates a
+// savepoint from joining the transaction: the nested failure is erased, the work
+// done before it is committed.
+//
+// It also settles the question the aborted-transaction test raises. There, a
+// swallowed failure poisons everything that follows with 25P02. Here the same
+// failure is swallowed on purpose and the transaction keeps working — because
+// ROLLBACK TO SAVEPOINT is what brings it back out of the aborted state.
+func (s *RepositorySuite) TestExecuteNested_UndoesOnlyItsOwnWrites() {
+	t := s.T()
+	ctx := t.Context()
+
+	name := "savepoint-" + t.Name()
+	email := "savepoint-" + t.Name() + "@example.com"
+
+	t.Cleanup(func() {
+		// Detached: t.Context() is already cancelled by the time cleanup runs. This
+		// transaction commits, so its rows outlive the test unless we delete them.
+		cleanupCtx := context.WithoutCancel(ctx)
+		_, _ = s.pg.Pool.Exec(cleanupCtx, `DELETE FROM companies WHERE name = $1`, name)
+		_, _ = s.pg.Pool.Exec(cleanupCtx, `DELETE FROM users WHERE email = $1`, email)
+	})
+
+	err := s.txManager.Execute(ctx, func(txCtx context.Context) error {
+		company := &domain.Company{Name: name, SeatLimit: 3}
+		if err := s.companies.Create(txCtx, company); err != nil {
+			return err
+		}
+
+		nestedErr := s.txManager.ExecuteNested(txCtx, func(nestedCtx context.Context) error {
+			user := &domain.User{
+				FirstName: "Savepoint", LastName: "Test",
+				Email: email, Username: "savepoint-" + t.Name(),
+			}
+			if err := s.users.Create(nestedCtx, user); err != nil {
+				return err
+			}
+
+			// A membership pointing at a company that does not exist 👉 the foreign key rejects it, and the whole
+			// subtransaction goes with it, including the user inserted a line above.
+			return s.memberships.Add(nestedCtx, &domain.Membership{
+				UserID:    user.ID,
+				CompanyID: uuidNotInDatabase,
+				Role:      domain.RoleOwner,
+			})
+		})
+		require.ErrorIs(t, nestedErr, domain.ErrCompanyNotFound)
+		require.NotErrorIs(t, nestedErr, domain.ErrConflictAbortsTransaction,
+			"an ordinary failure is the caller's to step over")
+
+		// Stepping over it, which is the entire reason to open a savepoint. In an
+		// aborted transaction this read would come back as 25P02.
+		_, err := s.companies.GetByID(txCtx, company.ID)
+		return err
+	})
+	require.NoError(t, err, "the outer transaction must survive the nested failure and commit")
+
+	var companies, users int
+	require.NoError(t, s.pg.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM companies WHERE name = $1`, name).Scan(&companies))
+	require.Equal(t, 1, companies, "the write made before the savepoint was committed")
+	require.NoError(t, s.pg.Pool.QueryRow(ctx,
+		`SELECT count(*) FROM users WHERE email = $1`, email).Scan(&users))
+	require.Zero(t, users, "the write made inside the savepoint was rolled back")
+}
+
 // TestExecute_ReportsATransactionTheServerAborted is the one failure mode that
 // looks like a success from the application's side.
 //
