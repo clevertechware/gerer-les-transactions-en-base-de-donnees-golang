@@ -199,9 +199,8 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 // the failure aborts the outer transaction anyway, which is what joining already does, for free. Use it for work the
 // outcome does not depend on — and only there.
 //
-// pgx.BeginFunc opens the savepoint, releases it, and rolls back to it. The savepoint inherits the isolation level
-// and the access mode of the transaction it opens in: PostgreSQL only accepts SET TRANSACTION before the first
-// statement, so there is nothing to negotiate here and no options to take.
+// The savepoint inherits the isolation level and the access mode of the transaction it opens in. PostgreSQL only
+// accepts SET TRANSACTION before the first statement, so there is nothing to negotiate here and no options to take.
 //
 // A savepoint is a subtransaction, and each one that writes consumes an XID. Past 64 live subtransactions in a
 // session the visibility checks fall off the subtrans cache and every read starts paying for it, so this belongs
@@ -212,18 +211,30 @@ func (t *TxManager) ExecuteNested(ctx context.Context, unitOfWork transaction.Un
 		return t.Execute(ctx, unitOfWork)
 	}
 
-	err := pgx.BeginFunc(ctx, state.tx, func(savepoint pgx.Tx) error {
-		return unitOfWork(contextWithTx(ctx, savepoint, state.opts))
-	})
-
-	// A serialization failure or a deadlock is not contained by the savepoint: the snapshot does not move when we roll
-	// back to it, and the server has already doomed the whole transaction. Only the outermost boundary can answer it,
-	// by replaying everything, so this is marked as the error that must reach it.
-	if isRetryable(err) {
-		return fmt.Errorf("%w: %w", domain.ErrConflictAbortsTransaction, err)
+	savepoint, err := state.tx.Begin(ctx)
+	if err != nil {
+		return fmt.Errorf("opening savepoint: %w", err)
 	}
 
-	return err
+	// Load-bearing beyond cleanup: a failed statement leaves the subtransaction aborted, and PostgreSQL answers 25P02
+	// to everything until someone rolls back to the savepoint. This is what hands the outer transaction back usable.
+	defer t.rollback(ctx, savepoint)
+
+	if err = unitOfWork(contextWithTx(ctx, savepoint, state.opts)); err != nil {
+		// A serialization failure or a deadlock is not contained by the savepoint: the snapshot does not move when we
+		// roll back to it, and the server has already doomed the whole transaction. Only the outermost boundary can
+		// answer it, by replaying everything, so this is marked as the error that must reach it.
+		if isRetryable(err) {
+			return fmt.Errorf("%w: %w", domain.ErrConflictAbortsTransaction, err)
+		}
+		return err
+	}
+
+	if err = savepoint.Commit(ctx); err != nil {
+		return fmt.Errorf("releasing savepoint: %w", err)
+	}
+
+	return nil
 }
 
 // ConflictRetries reports how many times a transaction was replayed after a serialization failure or a deadlock.

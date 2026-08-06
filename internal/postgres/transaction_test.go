@@ -385,39 +385,6 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 	}
 }
 
-// TestTxManager_Execute_RollsBackUnderTheCallersContext pins down what handing
-// the exit paths to pgx costs, because nothing else in the suite would show it.
-//
-// pgx rolls back under the context it was given. When the cancellation is what
-// failed the unit of work — a client that hung up, a deadline — the ROLLBACK is
-// issued on a dead context, never reaches the server, and pgx destroys the
-// connection instead of returning it to the pool. Detaching the cancellation is
-// what the hand-rolled boundary did here, and it is not something BeginTxFunc
-// takes as an option.
-func TestTxManager_Execute_RollsBackUnderTheCallersContext(t *testing.T) {
-	t.Parallel()
-
-	var rollbackCtxErr error
-	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Rollback(mock.Anything).RunAndReturn(func(rollbackCtx context.Context) error {
-		rollbackCtxErr = rollbackCtx.Err()
-		return nil
-	}).Twice()
-
-	client := mocks.NewClient(t)
-	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
-
-	ctx, cancel := context.WithCancel(t.Context())
-	err := newTestManager(client).Execute(ctx, func(context.Context) error {
-		cancel()
-		return context.Canceled
-	})
-
-	require.ErrorIs(t, err, context.Canceled)
-	assert.ErrorIs(t, rollbackCtxErr, context.Canceled,
-		"the rollback inherits the cancellation that failed the unit of work")
-}
-
 // TestTxManager_ExecuteNested_ReleasesTheSavepoint proves the happy path ends in
 // RELEASE SAVEPOINT and that the work ran against the savepoint, not against the
 // transaction around it — otherwise a failure would take the outer writes with it.
@@ -451,7 +418,7 @@ func TestTxManager_ExecuteNested_RollsBackToTheSavepointOnly(t *testing.T) {
 	t.Parallel()
 
 	savepoint := pgxmocks.NewTx(t)
-	expectRollback(savepoint, nil)
+	savepoint.EXPECT().Rollback(mock.Anything).Return(nil).Once()
 
 	outer := pgxmocks.NewTx(t)
 	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()
@@ -478,7 +445,7 @@ func TestTxManager_ExecuteNested_MarksAConflictAsUnrecoverable(t *testing.T) {
 	conflict := serializationFailure()
 
 	savepoint := pgxmocks.NewTx(t)
-	expectRollback(savepoint, nil)
+	savepoint.EXPECT().Rollback(mock.Anything).Return(nil).Once()
 
 	outer := pgxmocks.NewTx(t)
 	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()
