@@ -39,6 +39,18 @@ func expectCommit(tx *pgxmocks.Tx) {
 	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
 }
 
+// expectRollback sets the expectations of a transaction that is rolled back.
+//
+// pgx rolls back twice on the failure path — once explicitly, once from the defer
+// that also covers the panic — and leans on the transaction being closed for the
+// second to reach nothing. A mock has no such state, so the test carries what the
+// driver knows: the first call answers cause, the second answers ErrTxClosed as a
+// closed transaction would.
+func expectRollback(tx *pgxmocks.Tx, cause error) {
+	tx.EXPECT().Rollback(mock.Anything).Return(cause).Once()
+	tx.EXPECT().Rollback(mock.Anything).Return(pgx.ErrTxClosed).Once()
+}
+
 // TestTxManager_Execute_Commits proves the happy path ends in COMMIT, not just
 // "no error".
 func TestTxManager_Execute_Commits(t *testing.T) {
@@ -69,7 +81,7 @@ func TestTxManager_Execute_RollsBackAndReturnsCause(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Rollback(mock.Anything).Return(nil).Once()
+	expectRollback(tx, nil)
 
 	client := mocks.NewClient(t)
 	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
@@ -84,11 +96,15 @@ func TestTxManager_Execute_RollsBackAndReturnsCause(t *testing.T) {
 
 // TestTxManager_Execute_RollbackFailureKeepsCause guards a mistake that is easy
 // to make: reporting the rollback error and losing why we rolled back.
+//
+// pgx holds that line by ignoring the rollback it issues itself and filtering the
+// second one on ErrTxClosed — not by deciding the cause matters more. A rollback
+// that failed on a transaction the driver still believed open would replace it.
 func TestTxManager_Execute_RollbackFailureKeepsCause(t *testing.T) {
 	t.Parallel()
 
 	tx := pgxmocks.NewTx(t)
-	tx.EXPECT().Rollback(mock.Anything).Return(errors.New("connection reset")).Once()
+	expectRollback(tx, errors.New("connection reset"))
 
 	client := mocks.NewClient(t)
 	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
@@ -346,7 +362,7 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 				if outcome == nil {
 					expectCommit(tx)
 				} else {
-					tx.EXPECT().Rollback(mock.Anything).Return(nil).Once()
+					expectRollback(tx, nil)
 				}
 				client.EXPECT().
 					BeginTx(mock.Anything, pgx.TxOptions{IsoLevel: pgx.Serializable}).
@@ -367,6 +383,39 @@ func TestTxManager_ExecuteSerializable(t *testing.T) {
 			assert.Equal(t, tt.wantRetries, manager.ConflictRetries(), "retry counter")
 		})
 	}
+}
+
+// TestTxManager_Execute_RollsBackUnderTheCallersContext pins down what handing
+// the exit paths to pgx costs, because nothing else in the suite would show it.
+//
+// pgx rolls back under the context it was given. When the cancellation is what
+// failed the unit of work — a client that hung up, a deadline — the ROLLBACK is
+// issued on a dead context, never reaches the server, and pgx destroys the
+// connection instead of returning it to the pool. Detaching the cancellation is
+// what the hand-rolled boundary did here, and it is not something BeginTxFunc
+// takes as an option.
+func TestTxManager_Execute_RollsBackUnderTheCallersContext(t *testing.T) {
+	t.Parallel()
+
+	var rollbackCtxErr error
+	tx := pgxmocks.NewTx(t)
+	tx.EXPECT().Rollback(mock.Anything).RunAndReturn(func(rollbackCtx context.Context) error {
+		rollbackCtxErr = rollbackCtx.Err()
+		return nil
+	}).Twice()
+
+	client := mocks.NewClient(t)
+	client.EXPECT().BeginTx(mock.Anything, pgx.TxOptions{}).Return(tx, nil).Once()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	err := newTestManager(client).Execute(ctx, func(context.Context) error {
+		cancel()
+		return context.Canceled
+	})
+
+	require.ErrorIs(t, err, context.Canceled)
+	assert.ErrorIs(t, rollbackCtxErr, context.Canceled,
+		"the rollback inherits the cancellation that failed the unit of work")
 }
 
 // TestTxManager_ExecuteNested_ReleasesTheSavepoint proves the happy path ends in
@@ -402,7 +451,7 @@ func TestTxManager_ExecuteNested_RollsBackToTheSavepointOnly(t *testing.T) {
 	t.Parallel()
 
 	savepoint := pgxmocks.NewTx(t)
-	savepoint.EXPECT().Rollback(mock.Anything).Return(nil).Once()
+	expectRollback(savepoint, nil)
 
 	outer := pgxmocks.NewTx(t)
 	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()
@@ -429,7 +478,7 @@ func TestTxManager_ExecuteNested_MarksAConflictAsUnrecoverable(t *testing.T) {
 	conflict := serializationFailure()
 
 	savepoint := pgxmocks.NewTx(t)
-	savepoint.EXPECT().Rollback(mock.Anything).Return(nil).Once()
+	expectRollback(savepoint, nil)
 
 	outer := pgxmocks.NewTx(t)
 	outer.EXPECT().Begin(mock.Anything).Return(savepoint, nil).Once()

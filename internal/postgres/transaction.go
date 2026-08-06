@@ -199,8 +199,9 @@ func (t *TxManager) ExecuteSerializable(ctx context.Context, unitOfWork transact
 // the failure aborts the outer transaction anyway, which is what joining already does, for free. Use it for work the
 // outcome does not depend on — and only there.
 //
-// The savepoint inherits the isolation level and the access mode of the transaction it opens in. PostgreSQL only
-// accepts SET TRANSACTION before the first statement, so there is nothing to negotiate here and no options to take.
+// pgx.BeginFunc opens the savepoint, releases it, and rolls back to it. The savepoint inherits the isolation level
+// and the access mode of the transaction it opens in: PostgreSQL only accepts SET TRANSACTION before the first
+// statement, so there is nothing to negotiate here and no options to take.
 //
 // A savepoint is a subtransaction, and each one that writes consumes an XID. Past 64 live subtransactions in a
 // session the visibility checks fall off the subtrans cache and every read starts paying for it, so this belongs
@@ -211,30 +212,18 @@ func (t *TxManager) ExecuteNested(ctx context.Context, unitOfWork transaction.Un
 		return t.Execute(ctx, unitOfWork)
 	}
 
-	savepoint, err := state.tx.Begin(ctx)
-	if err != nil {
-		return fmt.Errorf("opening savepoint: %w", err)
+	err := pgx.BeginFunc(ctx, state.tx, func(savepoint pgx.Tx) error {
+		return unitOfWork(contextWithTx(ctx, savepoint, state.opts))
+	})
+
+	// A serialization failure or a deadlock is not contained by the savepoint: the snapshot does not move when we roll
+	// back to it, and the server has already doomed the whole transaction. Only the outermost boundary can answer it,
+	// by replaying everything, so this is marked as the error that must reach it.
+	if isRetryable(err) {
+		return fmt.Errorf("%w: %w", domain.ErrConflictAbortsTransaction, err)
 	}
 
-	// Load-bearing beyond cleanup: a failed statement leaves the subtransaction aborted, and PostgreSQL answers 25P02
-	// to everything until someone rolls back to the savepoint. This is what hands the outer transaction back usable.
-	defer t.rollback(ctx, savepoint)
-
-	if err = unitOfWork(contextWithTx(ctx, savepoint, state.opts)); err != nil {
-		// A serialization failure or a deadlock is not contained by the savepoint: the snapshot does not move when we
-		// roll back to it, and the server has already doomed the whole transaction. Only the outermost boundary can
-		// answer it, by replaying everything, so this is marked as the error that must reach it.
-		if isRetryable(err) {
-			return fmt.Errorf("%w: %w", domain.ErrConflictAbortsTransaction, err)
-		}
-		return err
-	}
-
-	if err = savepoint.Commit(ctx); err != nil {
-		return fmt.Errorf("releasing savepoint: %w", err)
-	}
-
-	return nil
+	return err
 }
 
 // ConflictRetries reports how many times a transaction was replayed after a serialization failure or a deadlock.
@@ -243,6 +232,10 @@ func (t *TxManager) ConflictRetries() int64 {
 }
 
 // run opens a transaction with opts, executes unitOfWork against it, and commits or rolls back.
+//
+// pgx.BeginTxFunc owns the exit paths: it commits when unitOfWork returns nil, rolls back when it does not, and its
+// deferred rollback covers the panic. What it does not own is the vocabulary — it hands back the driver's error as
+// it is, so the one distinction the caller cannot afford to lose is restored here.
 func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork transaction.UnitOfWork) error {
 	// Nested calls join the ambient transaction instead of opening a second one.
 	if state, ok := txFromContext(ctx); ok {
@@ -252,41 +245,21 @@ func (t *TxManager) run(ctx context.Context, opts pgx.TxOptions, unitOfWork tran
 		return unitOfWork(ctx)
 	}
 
-	tx, err := t.client.BeginTx(ctx, opts)
-	if err != nil {
-		return fmt.Errorf("beginning transaction: %w", err)
+	err := pgx.BeginTxFunc(ctx, t.client, opts, func(tx pgx.Tx) error {
+		return unitOfWork(contextWithTx(ctx, tx, opts))
+	})
+
+	// PostgreSQL answered ROLLBACK to our COMMIT: the transaction was already aborted server-side, so the commit
+	// reached the server but wrote nothing. Worth its own error, the caller must not read it as a lost connection.
+	//
+	// Asking the returned error rather than the commit is a downgrade: a unit of work that returns something wrapping
+	// ErrTxCommitRollback would be reported as an aborted transaction. Nothing here does, and the single error that
+	// pgx.BeginTxFunc returns leaves no way to tell BEGIN, the unit of work and COMMIT apart.
+	if errors.Is(err, pgx.ErrTxCommitRollback) {
+		return fmt.Errorf("%w: %w", domain.ErrTransactionAborted, err)
 	}
 
-	// Scheduled before any work: it makes "the transaction is never left open" a property of this function rather
-	// than of its exit paths, and it covers the panic as well. After a successful commit, it is a no-op as pgx marks
-	// the transaction closed and answers ErrTxClosed without reaching the server.
-	defer t.rollback(ctx, tx)
-
-	if err = unitOfWork(contextWithTx(ctx, tx, opts)); err != nil {
-		return err
-	}
-
-	if err = tx.Commit(ctx); err != nil {
-		// PostgreSQL answered ROLLBACK to our COMMIT: the transaction was already aborted server-side, so the commit
-		// reached the server but wrote nothing. Worth its own error, the caller must not read it as a lost connection.
-		if errors.Is(err, pgx.ErrTxCommitRollback) {
-			return fmt.Errorf("%w: %w", domain.ErrTransactionAborted, err)
-		}
-		return fmt.Errorf("committing transaction: %w", err)
-	}
-
-	return nil
-}
-
-// rollback aborts tx, logging any failure.
-// The error is not returned: the caller already has the one that caused the rollback.
-//
-// You should be aware that we are detaching cancellation from ctx because rollback still has to reach the server
-// otherwise, on parent cancellation the transaction could stay open until the connection is reaped.
-func (t *TxManager) rollback(ctx context.Context, tx pgx.Tx) {
-	if err := tx.Rollback(context.WithoutCancel(ctx)); err != nil && !errors.Is(err, pgx.ErrTxClosed) {
-		t.logger.ErrorContext(ctx, "rolling back transaction", "error", err)
-	}
+	return err
 }
 
 // contextWithTx embeds tx and the options it was opened with in ctx, for downstream
