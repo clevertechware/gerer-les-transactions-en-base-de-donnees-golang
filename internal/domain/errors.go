@@ -45,4 +45,7 @@ var (
 	// ErrTransactionAborted indicates that the server had already rolled the transaction back when the commit was
 	// issued, so nothing was written.
 	ErrTransactionAborted = errors.New("transaction was already aborted when the commit was issued")
+	// ErrConflictAbortsTransaction indicates that a nested unit of work hit a concurrency conflict. It marks the one
+	// error a caller must never swallow: the conflict invalidates the whole transaction, not only the nested scope.
+	ErrConflictAbortsTransaction = errors.New("conflict with a concurrent transaction invalidates the whole transaction")
 )
