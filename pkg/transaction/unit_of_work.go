@@ -27,4 +27,16 @@ type Manager interface {
 	// it when PostgreSQL aborts with a serialization failure. Use it when a
 	// decision is made from a read that a concurrent write could invalidate.
 	ExecuteSerializable(ctx context.Context, unitOfWork UnitOfWork) error
+
+	// ExecuteNested runs unitOfWork in a nested scope inside the transaction
+	// already open, so its failure undoes only its own writes. Use it for work
+	// the caller intends to step over — an audit trail, a best-effort
+	// notification. If the error is propagated anyway, the outer transaction
+	// aborts exactly as it would have without the nesting, so prefer the plain
+	// boundaries.
+	//
+	// One error must never be stepped over: domain.ErrConflictAbortsTransaction
+	// says a concurrent transaction invalidated everything, and only the
+	// outermost boundary can answer it.
+	ExecuteNested(ctx context.Context, unitOfWork UnitOfWork) error
 }
